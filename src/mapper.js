@@ -11,7 +11,7 @@
 // 标准眼参数
 const STANDARD_EYE = {
   axialLength: 24,      // 眼轴长度 (mm)
-  retinalRadius: 12,    // 视网膜半径 (mm) = 眼轴/2
+  retinalRadius: 12,    // 视网膜半径 (mm) = 眼轴/2 (简化模型)
   fov: 200              // Optos 视场角 (度)
 };
 
@@ -23,13 +23,75 @@ const ANATOMY = {
   discToMaculaDistance: 4.5,  // 视盘到黄斑距离 (mm), 范围 4.0-5.0mm
   combinedDiscMaculaAngle: 18.7, // 视盘到黄斑的综合角度 (°)
   
+  // 角膜参数
+  corneaDiameter: 11.0,       // 角膜直径 (mm), 水平11.7mm, 垂直10.6mm, 取平均
+  corneaRadius: 7.8,          // 角膜前表面曲率半径 (mm), 范围 7.0-8.5mm
+  corneaThickness: 0.5,       // 角膜中央厚度 (mm), 约 0.5mm
+  
+  // 前房参数
+  anteriorChamberDepth: 3.0,  // 前房深度 (mm), 从角膜内皮到晶状体前表面, 范围 2.5-3.5mm
+  
+  // 角膜缘位置 (角膜与巩膜交界处)
   // 角膜缘到黄斑的弧长距离 (mm)
-  limbusToMaculaArc: 30.5,    // 角膜缘到黄斑的弧长 (24mm眼轴)
+  limbusToMaculaArc: 30.5,    // 角膜缘到黄斑的弧长 (24mm眼轴, 3mm前房深度)
   
   // 视盘大小 (变异大，仅供参考)
   discHorizontalDiameter: 1.79, // mm, 范围 0.91-2.76
   discVerticalDiameter: 1.97    // mm, 范围 1.08-2.76
 };
+
+/**
+ * 计算眼球几何参数
+ * 根据眼轴长度和前房深度计算更准确的眼球形状参数
+ * 
+ * @param {number} axialLength - 眼轴长度 (mm)
+ * @param {number} anteriorChamberDepth - 前房深度 (mm), 可选
+ * @returns {Object} 眼球几何参数
+ */
+export function calculateEyeGeometry(axialLength = 24, anteriorChamberDepth = null) {
+  const acd = anteriorChamberDepth ?? ANATOMY.anteriorChamberDepth;
+  
+  const corneaProtrusion = calculateCorneaProtrusion();
+  
+  const vitreousLength = axialLength - acd - ANATOMY.corneaThickness - corneaProtrusion;
+  
+  const retinalRadius = vitreousLength / 2 + corneaProtrusion / 2;
+  
+  const limbusToMaculaArc = calculateLimbusToMaculaArc(retinalRadius, acd, axialLength);
+  
+  return {
+    axialLength,
+    anteriorChamberDepth: acd,
+    corneaProtrusion,
+    retinalRadius,
+    limbusToMaculaArc,
+    corneaDiameter: ANATOMY.corneaDiameter,
+    corneaRadius: ANATOMY.corneaRadius,
+    corneaThickness: ANATOMY.corneaThickness
+  };
+}
+
+function calculateCorneaProtrusion() {
+  const r = ANATOMY.corneaRadius;
+  const d = ANATOMY.corneaDiameter;
+  const halfD = d / 2;
+  
+  if (halfD >= r) {
+    return r;
+  }
+  
+  const h = r - Math.sqrt(r * r - halfD * halfD);
+  
+  return h + ANATOMY.corneaThickness;
+}
+
+function calculateLimbusToMaculaArc(retinalRadius, anteriorChamberDepth, axialLength) {
+  const posteriorPoleToLimbus = axialLength - anteriorChamberDepth - ANATOMY.corneaThickness;
+  
+  const standardRatio = ANATOMY.limbusToMaculaArc / (STANDARD_EYE.axialLength / 2);
+  
+  return retinalRadius * standardRatio * (axialLength / STANDARD_EYE.axialLength);
+}
 
 /**
  * 计算视网膜参数
@@ -418,25 +480,23 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
 /**
  * 计算角膜缘到裂孔的弧长距离
  * 
- * 简化模型: 假设裂孔与黄斑在同一子午线上，仅考虑角度距离
- * 
  * @param {number} theta - 裂孔到黄斑的角度 (度)
  * @param {number} axialLength - 眼轴长度 (mm), 默认 24
- * @returns {Object} { arcToMaculaMm, limbusToBreakMm }
+ * @param {number} anteriorChamberDepth - 前房深度 (mm), 可选
+ * @returns {Object} { arcToMaculaMm, limbusToBreakMm, eyeGeometry }
  */
-export function calculateLimbusDistance(theta, axialLength = 24) {
-  // 视网膜半径
-  const R = axialLength / 2;
+export function calculateLimbusDistance(theta, axialLength = 24, anteriorChamberDepth = null) {
+  const eyeGeometry = calculateEyeGeometry(axialLength, anteriorChamberDepth);
   
-  // 弧长 = R × θ (θ 需转换为弧度)
+  const R = eyeGeometry.retinalRadius;
   const arcToMaculaMm = R * theta * (Math.PI / 180);
   
-  // 角膜缘到裂孔 = 角膜缘到黄斑 - 裂孔到黄斑
-  const limbusToBreakMm = ANATOMY.limbusToMaculaArc - arcToMaculaMm;
+  const limbusToBreakMm = eyeGeometry.limbusToMaculaArc - arcToMaculaMm;
   
   return {
     arcToMaculaMm,
-    limbusToBreakMm
+    limbusToBreakMm,
+    eyeGeometry
   };
 }
 

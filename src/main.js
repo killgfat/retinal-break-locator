@@ -11,7 +11,8 @@ import {
   getAnatomyReference,
   calculateBreakToMacula,
   calculateLimbusDistance,
-  getClockHourPosition
+  getClockHourPosition,
+  calculateEyeGeometry
 } from './mapper.js';
 
 let currentImage = null;
@@ -30,6 +31,7 @@ const processBtn = document.getElementById('process-btn');
 const loading = document.getElementById('loading');
 const infoPanel = document.getElementById('info-panel');
 const axialLengthInput = document.getElementById('axial-length');
+const anteriorChamberDepthInput = document.getElementById('anterior-chamber-depth');
 const fovInput = document.getElementById('fov');
 const displayModeSelect = document.getElementById('display-mode');
 const imagePreview = document.getElementById('image-preview');
@@ -41,6 +43,11 @@ function init() {
   initVisualization();
   setupEventListeners();
   updateInfo();
+}
+
+function getAnteriorChamberDepth() {
+  const value = parseFloat(anteriorChamberDepthInput.value);
+  return isNaN(value) || value === 0 ? null : value;
 }
 
 function setupEventListeners() {
@@ -70,6 +77,7 @@ function setupEventListeners() {
   processBtn.addEventListener('click', processImage);
   
   axialLengthInput.addEventListener('change', updateInfo);
+  anteriorChamberDepthInput.addEventListener('change', updateInfo);
   fovInput.addEventListener('change', updateInfo);
   
   displayModeSelect.addEventListener('change', (e) => {
@@ -218,6 +226,7 @@ function updateHoleInfo() {
   
   const fov = parseFloat(fovInput.value) || 200;
   const axialLength = parseFloat(axialLengthInput.value) || 24;
+  const anteriorChamberDepth = getAnteriorChamberDepth();
   const imageAspect = currentImage ? currentImage.width / currentImage.height : 1;
   
   let eyeSide = 'right';
@@ -238,7 +247,7 @@ function updateHoleInfo() {
     { axialLength, fov, imageAspect }
   );
   
-  const limbusResult = calculateLimbusDistance(breakResult.angleDeg, axialLength);
+  const limbusResult = calculateLimbusDistance(breakResult.angleDeg, axialLength, anteriorChamberDepth);
   
   const clockPosition = getClockHourPosition(breakResult.phi, eyeSide);
   
@@ -338,10 +347,12 @@ function finishImageLoad() {
   updatePreviewMarkers();
   
   const axialLength = parseFloat(axialLengthInput.value) || 24;
+  const anteriorChamberDepth = getAnteriorChamberDepth();
   const fov = parseFloat(fovInput.value) || 200;
   updateTexture(currentImage, { 
     fov, 
     axialLength,
+    anteriorChamberDepth,
     maculaX: markers.macula.x,
     maculaY: markers.macula.y,
     discX: markers.disc.set ? markers.disc.x : null,
@@ -355,20 +366,24 @@ function finishImageLoad() {
 
 function updateInfo() {
   const axialLength = parseFloat(axialLengthInput.value) || 24;
+  const anteriorChamberDepth = getAnteriorChamberDepth();
   const fov = parseFloat(fovInput.value) || 200;
   const imageWidth = currentImage ? currentImage.width : 2000;
   
   const params = calculateRetinalParameters(axialLength, fov, imageWidth);
+  const eyeGeometry = calculateEyeGeometry(axialLength, anteriorChamberDepth);
   
-  document.getElementById('retina-radius').textContent = `${params.retinalRadius.toFixed(2)} mm`;
+  document.getElementById('retina-radius').textContent = `${eyeGeometry.retinalRadius.toFixed(2)} mm`;
   document.getElementById('pixel-scale').textContent = `${params.mmPerPixel.toFixed(4)} mm/px`;
   
   if (currentImage) {
     const axialLength = parseFloat(axialLengthInput.value) || 24;
+    const anteriorChamberDepth = getAnteriorChamberDepth();
     const fov = parseFloat(fovInput.value) || 200;
     updateTexture(currentImage, { 
       fov, 
       axialLength,
+      anteriorChamberDepth,
       maculaX: markers.macula.x,
       maculaY: markers.macula.y,
       discX: markers.disc.set ? markers.disc.x : null,
@@ -390,6 +405,7 @@ function processImage() {
   requestAnimationFrame(() => {
     try {
       const axialLength = parseFloat(axialLengthInput.value) || 24;
+      const anteriorChamberDepth = getAnteriorChamberDepth();
       const fov = parseFloat(fovInput.value) || 200;
       
       const options = {
@@ -407,6 +423,7 @@ function processImage() {
       updateTexture(currentImage, { 
         fov, 
         axialLength,
+        anteriorChamberDepth,
         maculaX: markers.macula.x,
         maculaY: markers.macula.y,
         discX: markers.disc.set ? markers.disc.x : null,
