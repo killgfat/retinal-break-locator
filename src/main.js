@@ -33,6 +33,7 @@ const infoPanel = document.getElementById('info-panel');
 const axialLengthInput = document.getElementById('axial-length');
 const corneaDiameterInput = document.getElementById('cornea-diameter');
 const corneaKValueInput = document.getElementById('cornea-k-value');
+const corneaDValueInput = document.getElementById('cornea-d-value');
 const fovInput = document.getElementById('fov');
 const displayModeSelect = document.getElementById('display-mode');
 const imagePreview = document.getElementById('image-preview');
@@ -52,8 +53,18 @@ function getCorneaDiameter() {
 }
 
 function getCorneaKValue() {
-  const value = parseFloat(corneaKValueInput.value);
-  return isNaN(value) || value === 0 ? null : value;
+  const kValue = parseFloat(corneaKValueInput.value);
+  const dValue = parseFloat(corneaDValueInput.value);
+  
+  if (!isNaN(kValue) && kValue > 0) {
+    return kValue;
+  }
+  
+  if (!isNaN(dValue) && dValue > 0) {
+    return 337.5 / dValue;
+  }
+  
+  return null;
 }
 
 function setupEventListeners() {
@@ -84,7 +95,18 @@ function setupEventListeners() {
   
   axialLengthInput.addEventListener('change', updateInfo);
   corneaDiameterInput.addEventListener('change', updateInfo);
-  corneaKValueInput.addEventListener('change', updateInfo);
+  corneaKValueInput.addEventListener('input', () => {
+    if (corneaKValueInput.value) {
+      corneaDValueInput.value = '';
+    }
+    updateInfo();
+  });
+  corneaDValueInput.addEventListener('input', () => {
+    if (corneaDValueInput.value) {
+      corneaKValueInput.value = '';
+    }
+    updateInfo();
+  });
   fovInput.addEventListener('change', updateInfo);
   
   displayModeSelect.addEventListener('change', (e) => {

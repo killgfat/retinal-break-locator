@@ -518,8 +518,11 @@
           </div>
           
           <div class="control-group">
-            <label>角膜曲率 K值 (mm) <span style="color: #666; font-size: 0.75rem;">可选</span></label>
-            <input type="number" id="cornea-k-value" value="" step="0.1" min="7.0" max="8.5" placeholder="默认7.8">
+            <label>角膜曲率 <span style="color: #666; font-size: 0.75rem;">二选一</span></label>
+            <div class="control-row">
+              <input type="number" id="cornea-k-value" value="" step="0.1" min="7.0" max="8.5" placeholder="K值(mm)">
+              <input type="number" id="cornea-d-value" value="" step="0.1" min="40.0" max="48.0" placeholder="D值">
+            </div>
           </div>
           
           <div class="control-group">
