@@ -376,83 +376,6 @@
       margin: 15px 0;
     }
     
-    @media (max-width: 1200px) {
-      .main-content {
-        grid-template-columns: 280px 1fr 1fr;
-      }
-      
-      .panel {
-        padding: 15px;
-      }
-      
-      .panel h2 {
-        font-size: 1rem;
-      }
-      
-      .upload-area {
-        padding: 20px 10px;
-      }
-      
-      .upload-icon {
-        font-size: 28px;
-      }
-      
-      #canvas-container {
-        height: 450px;
-      }
-      
-      .image-preview {
-        min-height: 450px;
-      }
-    }
-    
-    @media (max-width: 1024px) {
-      .main-content {
-        grid-template-columns: 260px 1fr 1fr;
-      }
-      
-      .controls {
-        margin-top: 10px;
-      }
-      
-      .control-group {
-        margin-bottom: 8px;
-      }
-      
-      .marker-section {
-        margin-top: 10px;
-        padding-top: 10px;
-      }
-    }
-    
-    @media (max-width: 900px) {
-      .main-content {
-        grid-template-columns: 1fr 1fr;
-        gap: 15px;
-      }
-      
-      .panel:first-child {
-        order: 3;
-        grid-column: 1 / -1;
-      }
-      
-      .panel:nth-child(2) {
-        order: 1;
-      }
-      
-      .panel:last-child {
-        order: 2;
-      }
-      
-      #canvas-container {
-        height: 400px;
-      }
-      
-      .image-preview {
-        min-height: 400px;
-      }
-    }
-    
     @media (max-width: 768px) {
       .container {
         padding: 10px;
@@ -474,13 +397,6 @@
       .main-content {
         grid-template-columns: 1fr;
         gap: 15px;
-      }
-      
-      .panel:first-child,
-      .panel:nth-child(2),
-      .panel:last-child {
-        order: unset;
-        grid-column: unset;
       }
       
       .panel {
@@ -524,8 +440,8 @@
         height: 350px;
       }
       
-      .image-preview {
-        min-height: 300px;
+      .image-placeholder {
+        height: 300px;
       }
       
       .info-item {
@@ -560,38 +476,6 @@
         height: 280px;
       }
       
-      .image-preview {
-        min-height: 250px;
-      }
-    }
-    
-    .image-placeholder {
-      height: 500px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #666;
-    }
-    
-    @media (max-width: 1200px) {
-      .image-placeholder {
-        height: 450px;
-      }
-    }
-    
-    @media (max-width: 900px) {
-      .image-placeholder {
-        height: 400px;
-      }
-    }
-    
-    @media (max-width: 768px) {
-      .image-placeholder {
-        height: 300px;
-      }
-    }
-    
-    @media (max-width: 480px) {
       .image-placeholder {
         height: 250px;
       }
@@ -629,13 +513,13 @@
           </div>
           
           <div class="control-group">
-            <label>前房深度 (mm) <span style="color: #666; font-size: 0.75rem;">默认3.0</span></label>
-            <input type="number" id="anterior-chamber-depth" value="" step="0.1" min="2.0" max="4.5" placeholder="留空使用默认值">
+            <label>前房深度 (mm)</label>
+            <input type="number" id="anterior-chamber-depth" value="3.0" step="0.1" min="2.0" max="4.5">
           </div>
           
           <div class="control-group">
-            <label>角膜直径 WTW (mm) <span style="color: #666; font-size: 0.75rem;">默认11.7</span></label>
-            <input type="number" id="cornea-diameter" value="" step="0.1" min="10.0" max="13.0" placeholder="留空使用默认值">
+            <label>角膜直径 WTW (mm)</label>
+            <input type="number" id="cornea-diameter" value="11.7" step="0.1" min="10.0" max="13.0">
           </div>
           
           <div class="control-group">

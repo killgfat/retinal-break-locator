@@ -48,12 +48,12 @@ function init() {
 
 function getAnteriorChamberDepth() {
   const value = parseFloat(anteriorChamberDepthInput.value);
-  return isNaN(value) || value === 0 ? null : value;
+  return isNaN(value) ? 3.0 : value;
 }
 
 function getCorneaDiameter() {
   const value = parseFloat(corneaDiameterInput.value);
-  return isNaN(value) || value === 0 ? null : value;
+  return isNaN(value) ? 11.7 : value;
 }
 
 function setupEventListeners() {
