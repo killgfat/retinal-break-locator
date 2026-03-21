@@ -25,15 +25,12 @@ const ANATOMY = {
   
   // 角膜参数
   corneaDiameter: 11.7,       // 角膜直径 WTW (mm), 水平11.7mm, 垂直10.6mm, 范围 10.5-12.5mm
-  corneaRadius: 7.8,          // 角膜前表面曲率半径 (mm), 范围 7.0-8.5mm
+  corneaRadius: 7.8,          // 角膜曲率半径 K值 (mm), 范围 7.0-8.5mm
   corneaThickness: 0.5,       // 角膜中央厚度 (mm), 约 0.5mm
-  
-  // 前房参数
-  anteriorChamberDepth: 3.0,  // 前房深度 (mm), 从角膜内皮到晶状体前表面, 范围 2.5-3.5mm
   
   // 角膜缘位置 (角膜与巩膜交界处)
   // 角膜缘到黄斑的弧长距离 (mm)
-  limbusToMaculaArc: 30.5,    // 角膜缘到黄斑的弧长 (24mm眼轴, 3mm前房深度)
+  limbusToMaculaArc: 30.5,    // 角膜缘到黄斑的弧长 (24mm眼轴)
   
   // 视盘大小 (变异大，仅供参考)
   discHorizontalDiameter: 1.79, // mm, 范围 0.91-2.76
@@ -42,39 +39,37 @@ const ANATOMY = {
 
 /**
  * 计算眼球几何参数
- * 根据眼轴长度、前房深度和角膜直径计算更准确的眼球形状参数
+ * 根据眼轴长度、角膜直径和角膜曲率计算眼球形状参数
  * 
  * @param {number} axialLength - 眼轴长度 (mm)
- * @param {number} anteriorChamberDepth - 前房深度 (mm), 可选
- * @param {number} corneaDiameter - 角膜直径 WTW (mm), 可选
+ * @param {number} corneaDiameter - 角膜直径 WTW (mm)
+ * @param {number} corneaKValue - 角膜曲率半径 K值 (mm), 可选
  * @returns {Object} 眼球几何参数
  */
-export function calculateEyeGeometry(axialLength = 24, anteriorChamberDepth = null, corneaDiameter = null) {
-  const acd = anteriorChamberDepth ?? ANATOMY.anteriorChamberDepth;
+export function calculateEyeGeometry(axialLength = 24, corneaDiameter = null, corneaKValue = null) {
   const wtw = corneaDiameter ?? ANATOMY.corneaDiameter;
+  const kValue = corneaKValue ?? ANATOMY.corneaRadius;
   
   const retinalRadius = axialLength / 2;
   
-  const corneaSag = calculateCorneaSag(wtw);
+  const corneaSag = calculateCorneaSag(wtw, kValue);
   
-  const limbusToMaculaArc = calculateLimbusToMaculaArc(retinalRadius, acd, axialLength, wtw);
+  const limbusToMaculaArc = calculateLimbusToMaculaArc(retinalRadius, axialLength, wtw);
   
   return {
     axialLength,
-    anteriorChamberDepth: acd,
     corneaSag,
     retinalRadius,
     limbusToMaculaArc,
     corneaDiameter: wtw,
-    corneaRadius: ANATOMY.corneaRadius,
+    corneaRadius: kValue,
     corneaThickness: ANATOMY.corneaThickness
   };
 }
 
-function calculateCorneaSag(corneaDiameter) {
-  const r = ANATOMY.corneaRadius;
-  const d = corneaDiameter;
-  const halfD = d / 2;
+function calculateCorneaSag(corneaDiameter, corneaRadius) {
+  const r = corneaRadius;
+  const halfD = corneaDiameter / 2;
   
   if (halfD >= r) {
     return r;
@@ -83,7 +78,7 @@ function calculateCorneaSag(corneaDiameter) {
   return r - Math.sqrt(r * r - halfD * halfD);
 }
 
-function calculateLimbusToMaculaArc(retinalRadius, anteriorChamberDepth, axialLength, corneaDiameter) {
+function calculateLimbusToMaculaArc(retinalRadius, axialLength, corneaDiameter) {
   const halfWtw = corneaDiameter / 2;
   const standardWtw = ANATOMY.corneaDiameter / 2;
   
@@ -487,8 +482,8 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
  * @param {number} corneaDiameter - 角膜直径 WTW (mm), 可选
  * @returns {Object} { arcToMaculaMm, limbusToBreakMm, eyeGeometry }
  */
-export function calculateLimbusDistance(theta, axialLength = 24, anteriorChamberDepth = null, corneaDiameter = null) {
-  const eyeGeometry = calculateEyeGeometry(axialLength, anteriorChamberDepth, corneaDiameter);
+export function calculateLimbusDistance(theta, axialLength = 24, corneaDiameter = null, corneaKValue = null) {
+  const eyeGeometry = calculateEyeGeometry(axialLength, corneaDiameter, corneaKValue);
   
   const R = eyeGeometry.retinalRadius;
   const arcToMaculaMm = R * theta * (Math.PI / 180);

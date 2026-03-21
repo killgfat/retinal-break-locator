@@ -31,8 +31,8 @@ const processBtn = document.getElementById('process-btn');
 const loading = document.getElementById('loading');
 const infoPanel = document.getElementById('info-panel');
 const axialLengthInput = document.getElementById('axial-length');
-const anteriorChamberDepthInput = document.getElementById('anterior-chamber-depth');
 const corneaDiameterInput = document.getElementById('cornea-diameter');
+const corneaKValueInput = document.getElementById('cornea-k-value');
 const fovInput = document.getElementById('fov');
 const displayModeSelect = document.getElementById('display-mode');
 const imagePreview = document.getElementById('image-preview');
@@ -46,14 +46,14 @@ function init() {
   updateInfo();
 }
 
-function getAnteriorChamberDepth() {
-  const value = parseFloat(anteriorChamberDepthInput.value);
-  return isNaN(value) ? 3.0 : value;
-}
-
 function getCorneaDiameter() {
   const value = parseFloat(corneaDiameterInput.value);
   return isNaN(value) ? 11.7 : value;
+}
+
+function getCorneaKValue() {
+  const value = parseFloat(corneaKValueInput.value);
+  return isNaN(value) || value === 0 ? null : value;
 }
 
 function setupEventListeners() {
@@ -83,8 +83,8 @@ function setupEventListeners() {
   processBtn.addEventListener('click', processImage);
   
   axialLengthInput.addEventListener('change', updateInfo);
-  anteriorChamberDepthInput.addEventListener('change', updateInfo);
   corneaDiameterInput.addEventListener('change', updateInfo);
+  corneaKValueInput.addEventListener('change', updateInfo);
   fovInput.addEventListener('change', updateInfo);
   
   displayModeSelect.addEventListener('change', (e) => {
@@ -233,8 +233,8 @@ function updateHoleInfo() {
   
   const fov = parseFloat(fovInput.value) || 200;
   const axialLength = parseFloat(axialLengthInput.value) || 24;
-  const anteriorChamberDepth = getAnteriorChamberDepth();
   const corneaDiameter = getCorneaDiameter();
+  const corneaKValue = getCorneaKValue();
   const imageAspect = currentImage ? currentImage.width / currentImage.height : 1;
   
   let eyeSide = 'right';
@@ -255,7 +255,7 @@ function updateHoleInfo() {
     { axialLength, fov, imageAspect }
   );
   
-  const limbusResult = calculateLimbusDistance(breakResult.angleDeg, axialLength, anteriorChamberDepth, corneaDiameter);
+  const limbusResult = calculateLimbusDistance(breakResult.angleDeg, axialLength, corneaDiameter, corneaKValue);
   
   const clockPosition = getClockHourPosition(breakResult.phi, eyeSide);
   
@@ -355,14 +355,14 @@ function finishImageLoad() {
   updatePreviewMarkers();
   
   const axialLength = parseFloat(axialLengthInput.value) || 24;
-  const anteriorChamberDepth = getAnteriorChamberDepth();
   const corneaDiameter = getCorneaDiameter();
+  const corneaKValue = getCorneaKValue();
   const fov = parseFloat(fovInput.value) || 200;
   updateTexture(currentImage, { 
     fov, 
     axialLength,
-    anteriorChamberDepth,
     corneaDiameter,
+    corneaKValue,
     maculaX: markers.macula.x,
     maculaY: markers.macula.y,
     discX: markers.disc.set ? markers.disc.x : null,
@@ -376,27 +376,27 @@ function finishImageLoad() {
 
 function updateInfo() {
   const axialLength = parseFloat(axialLengthInput.value) || 24;
-  const anteriorChamberDepth = getAnteriorChamberDepth();
   const corneaDiameter = getCorneaDiameter();
+  const corneaKValue = getCorneaKValue();
   const fov = parseFloat(fovInput.value) || 200;
   const imageWidth = currentImage ? currentImage.width : 2000;
   
   const params = calculateRetinalParameters(axialLength, fov, imageWidth);
-  const eyeGeometry = calculateEyeGeometry(axialLength, anteriorChamberDepth, corneaDiameter);
+  const eyeGeometry = calculateEyeGeometry(axialLength, corneaDiameter, corneaKValue);
   
   document.getElementById('retina-radius').textContent = `${eyeGeometry.retinalRadius.toFixed(2)} mm`;
   document.getElementById('pixel-scale').textContent = `${params.mmPerPixel.toFixed(4)} mm/px`;
   
   if (currentImage) {
     const axialLength = parseFloat(axialLengthInput.value) || 24;
-    const anteriorChamberDepth = getAnteriorChamberDepth();
     const corneaDiameter = getCorneaDiameter();
+    const corneaKValue = getCorneaKValue();
     const fov = parseFloat(fovInput.value) || 200;
     updateTexture(currentImage, { 
       fov, 
       axialLength,
-      anteriorChamberDepth,
       corneaDiameter,
+      corneaKValue,
       maculaX: markers.macula.x,
       maculaY: markers.macula.y,
       discX: markers.disc.set ? markers.disc.x : null,
@@ -418,8 +418,8 @@ function processImage() {
   requestAnimationFrame(() => {
     try {
       const axialLength = parseFloat(axialLengthInput.value) || 24;
-      const anteriorChamberDepth = getAnteriorChamberDepth();
       const corneaDiameter = getCorneaDiameter();
+      const corneaKValue = getCorneaKValue();
       const fov = parseFloat(fovInput.value) || 200;
       
       const options = {
@@ -437,8 +437,8 @@ function processImage() {
       updateTexture(currentImage, { 
         fov, 
         axialLength,
-        anteriorChamberDepth,
         corneaDiameter,
+        corneaKValue,
         maculaX: markers.macula.x,
         maculaY: markers.macula.y,
         discX: markers.disc.set ? markers.disc.x : null,
