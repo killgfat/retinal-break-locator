@@ -46,7 +46,7 @@ export function initVisualization() {
   scene.background = new THREE.Color(0x0f0f23);
   
   camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
-  camera.position.set(0, 0, -30);
+  camera.position.set(0, 0, 30);
   
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(width, height);
