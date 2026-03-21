@@ -626,17 +626,11 @@ function createLimbusArcLine(holePos, retinalRadius, corneaDiameter) {
   
   const holeAngle = Math.atan2(holePos.y, holePos.x);
   
-  const limbusPoint = {
-    x: halfWtw * Math.cos(holeAngle),
-    y: halfWtw * Math.sin(holeAngle),
-    z: zAtLimbus
-  };
-  
   const points = [];
   const segments = 50;
   
   const startTheta = Math.acos(-holePos.z / retinalRadius);
-  const endTheta = Math.acos(limbusPoint.z / retinalRadius);
+  const endTheta = Math.acos(zAtLimbus / retinalRadius);
   
   const phi = holeAngle;
   
@@ -646,7 +640,7 @@ function createLimbusArcLine(holePos, retinalRadius, corneaDiameter) {
     
     const x = retinalRadius * Math.sin(theta) * Math.cos(phi);
     const y = retinalRadius * Math.sin(theta) * Math.sin(phi);
-    const z = retinalRadius * Math.cos(theta);
+    const z = -retinalRadius * Math.cos(theta);
     
     points.push(new THREE.Vector3(x, y, z));
   }
