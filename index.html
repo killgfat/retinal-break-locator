@@ -378,11 +378,78 @@
     
     @media (max-width: 1200px) {
       .main-content {
+        grid-template-columns: 280px 1fr 1fr;
+      }
+      
+      .panel {
+        padding: 15px;
+      }
+      
+      .panel h2 {
+        font-size: 1rem;
+      }
+      
+      .upload-area {
+        padding: 20px 10px;
+      }
+      
+      .upload-icon {
+        font-size: 28px;
+      }
+      
+      #canvas-container {
+        height: 450px;
+      }
+      
+      .image-preview {
+        min-height: 450px;
+      }
+    }
+    
+    @media (max-width: 1024px) {
+      .main-content {
+        grid-template-columns: 260px 1fr 1fr;
+      }
+      
+      .controls {
+        margin-top: 10px;
+      }
+      
+      .control-group {
+        margin-bottom: 8px;
+      }
+      
+      .marker-section {
+        margin-top: 10px;
+        padding-top: 10px;
+      }
+    }
+    
+    @media (max-width: 900px) {
+      .main-content {
         grid-template-columns: 1fr 1fr;
+        gap: 15px;
       }
       
       .panel:first-child {
+        order: 3;
         grid-column: 1 / -1;
+      }
+      
+      .panel:nth-child(2) {
+        order: 1;
+      }
+      
+      .panel:last-child {
+        order: 2;
+      }
+      
+      #canvas-container {
+        height: 400px;
+      }
+      
+      .image-preview {
+        min-height: 400px;
       }
     }
     
@@ -407,6 +474,13 @@
       .main-content {
         grid-template-columns: 1fr;
         gap: 15px;
+      }
+      
+      .panel:first-child,
+      .panel:nth-child(2),
+      .panel:last-child {
+        order: unset;
+        grid-column: unset;
       }
       
       .panel {
@@ -450,8 +524,8 @@
         height: 350px;
       }
       
-      .image-preview > div:first-child {
-        height: 300px;
+      .image-preview {
+        min-height: 300px;
       }
       
       .info-item {
@@ -486,7 +560,39 @@
         height: 280px;
       }
       
-      .image-preview > div:first-child {
+      .image-preview {
+        min-height: 250px;
+      }
+    }
+    
+    .image-placeholder {
+      height: 500px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #666;
+    }
+    
+    @media (max-width: 1200px) {
+      .image-placeholder {
+        height: 450px;
+      }
+    }
+    
+    @media (max-width: 900px) {
+      .image-placeholder {
+        height: 400px;
+      }
+    }
+    
+    @media (max-width: 768px) {
+      .image-placeholder {
+        height: 300px;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      .image-placeholder {
         height: 250px;
       }
     }
@@ -635,7 +741,7 @@
       <div class="panel">
         <h2>🖼️ 图像预览 <span style="font-size: 0.8rem; color: #888; font-weight: normal;">(点击标记位置)</span></h2>
         <div class="image-preview" id="image-preview">
-          <div style="height: 500px; display: flex; align-items: center; justify-content: center; color: #666;">
+          <div class="image-placeholder">
             请上传眼底图像
           </div>
         </div>
