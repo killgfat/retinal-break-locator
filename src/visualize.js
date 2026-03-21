@@ -20,6 +20,7 @@ let flatMesh = null;
 let corneaMesh = null;
 let referenceSphere = null;
 let limbusRing = null;
+let limbusArcLine = null;
 let displayMode = 'sphere';
 let currentEyeGeometry = null;
 let markerMeshes = {
@@ -517,6 +518,13 @@ function updateMarkerMeshes() {
     }
   });
   
+  if (limbusArcLine) {
+    scene.remove(limbusArcLine);
+    limbusArcLine.geometry.dispose();
+    limbusArcLine.material.dispose();
+    limbusArcLine = null;
+  }
+  
   if (currentMarkers.macula) {
     markerMeshes.macula = createMarkerSphere(
       0, 0, -R,
@@ -551,6 +559,8 @@ function updateMarkerMeshes() {
       0xffe66d,
       '裂孔'
     );
+    
+    limbusArcLine = createLimbusArcLine(holePos, R, currentEyeGeometry.corneaDiameter);
   }
 }
 
@@ -610,6 +620,49 @@ function createMarkerSphere(x, y, z, color, label) {
   return group;
 }
 
+function createLimbusArcLine(holePos, retinalRadius, corneaDiameter) {
+  const halfWtw = corneaDiameter / 2;
+  const zAtLimbus = Math.sqrt(retinalRadius * retinalRadius - halfWtw * halfWtw);
+  
+  const holeAngle = Math.atan2(holePos.y, holePos.x);
+  
+  const limbusPoint = {
+    x: halfWtw * Math.cos(holeAngle),
+    y: halfWtw * Math.sin(holeAngle),
+    z: zAtLimbus
+  };
+  
+  const points = [];
+  const segments = 50;
+  
+  const startTheta = Math.acos(-holePos.z / retinalRadius);
+  const endTheta = Math.acos(limbusPoint.z / retinalRadius);
+  
+  const phi = holeAngle;
+  
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const theta = startTheta + t * (endTheta - startTheta);
+    
+    const x = retinalRadius * Math.sin(theta) * Math.cos(phi);
+    const y = retinalRadius * Math.sin(theta) * Math.sin(phi);
+    const z = retinalRadius * Math.cos(theta);
+    
+    points.push(new THREE.Vector3(x, y, z));
+  }
+  
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({
+    color: 0xffe66d,
+    linewidth: 1
+  });
+  
+  const line = new THREE.Line(geometry, material);
+  scene.add(line);
+  
+  return line;
+}
+
 /**
  * 清理资源
  */
@@ -636,6 +689,12 @@ export function dispose() {
     scene.remove(limbusRing);
     limbusRing.geometry.dispose();
     limbusRing.material.dispose();
+  }
+  
+  if (limbusArcLine) {
+    scene.remove(limbusArcLine);
+    limbusArcLine.geometry.dispose();
+    limbusArcLine.material.dispose();
   }
   
   if (referenceSphere) {
