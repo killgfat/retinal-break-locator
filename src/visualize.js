@@ -630,7 +630,7 @@ function createLimbusArcLine(holePos, retinalRadius, corneaDiameter) {
   const segments = 50;
   
   const startTheta = Math.acos(-holePos.z / retinalRadius);
-  const endTheta = Math.acos(zAtLimbus / retinalRadius);
+  const endTheta = Math.acos(-zAtLimbus / retinalRadius);
   
   const phi = holeAngle;
   
