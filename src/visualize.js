@@ -100,55 +100,51 @@ function createEyeballGeometry(retinalRadius, corneaRadius, corneaDiameter) {
   const vertices = [];
   const indices = [];
   
-  const segments = 64;
+  const segmentsLat = 64;
+  const segmentsLon = 64;
   const halfCorneaDiameter = corneaDiameter / 2;
-  const corneaArcAngle = Math.asin(halfCorneaDiameter / corneaRadius);
-  const corneaCenterZ = retinalRadius + corneaRadius * Math.cos(corneaArcAngle);
   
-  for (let i = 0; i <= segments; i++) {
-    for (let j = 0; j <= segments; j++) {
-      const theta = (i / segments) * Math.PI;
-      const phi = (j / segments) * 2 * Math.PI;
+  const zAtLimbus = Math.sqrt(retinalRadius * retinalRadius - halfCorneaDiameter * halfCorneaDiameter);
+  const corneaSag = corneaRadius - Math.sqrt(corneaRadius * corneaRadius - halfCorneaDiameter * halfCorneaDiameter);
+  const corneaApexZ = zAtLimbus + corneaSag;
+  
+  for (let lat = 0; lat <= segmentsLat; lat++) {
+    for (let lon = 0; lon <= segmentsLon; lon++) {
+      const latAngle = (lat / segmentsLat) * Math.PI;
+      const lonAngle = (lon / segmentsLon) * 2 * Math.PI;
       
       let x, y, z;
       
-      const sineTheta = Math.sin(theta);
-      const cosineTheta = Math.cos(theta);
+      const sinLat = Math.sin(latAngle);
+      const cosLat = Math.cos(latAngle);
+      const sinLon = Math.sin(lonAngle);
+      const cosLon = Math.cos(lonAngle);
       
-      if (theta <= Math.PI / 2) {
-        x = sineTheta * Math.cos(phi) * retinalRadius;
-        y = sineTheta * Math.sin(phi) * retinalRadius;
-        z = -cosineTheta * retinalRadius;
+      const radialDistance = sinLat * retinalRadius;
+      
+      const isInCorneaRegion = latAngle < Math.PI / 2 && radialDistance <= halfCorneaDiameter;
+      
+      if (isInCorneaRegion) {
+        const localR = radialDistance;
+        const sqrtVal = Math.sqrt(Math.max(0, corneaRadius * corneaRadius - localR * localR));
+        z = corneaApexZ - corneaRadius + sqrtVal;
+        x = localR * cosLon;
+        y = localR * sinLon;
       } else {
-        const corneaTheta = theta - Math.PI / 2;
-        const rAtTheta = halfCorneaDiameter * (corneaTheta / (Math.PI / 2));
-        const corneaThetaNormalized = corneaTheta / (Math.PI / 2);
-        
-        x = rAtTheta * Math.cos(phi);
-        y = rAtTheta * Math.sin(phi);
-        
-        if (rAtTheta <= halfCorneaDiameter) {
-          const localR = rAtTheta;
-          if (localR < corneaRadius) {
-            const sqrtPart = Math.sqrt(corneaRadius * corneaRadius - localR * localR);
-            z = corneaCenterZ - corneaRadius + sqrtPart;
-          } else {
-            z = corneaCenterZ - corneaRadius;
-          }
-        } else {
-          z = corneaCenterZ - corneaRadius;
-        }
+        x = sinLat * cosLon * retinalRadius;
+        y = sinLat * sinLon * retinalRadius;
+        z = cosLat * retinalRadius;
       }
       
       vertices.push(x, y, z);
     }
   }
   
-  for (let i = 0; i < segments; i++) {
-    for (let j = 0; j < segments; j++) {
-      const a = i * (segments + 1) + j;
+  for (let lat = 0; lat < segmentsLat; lat++) {
+    for (let lon = 0; lon < segmentsLon; lon++) {
+      const a = lat * (segmentsLon + 1) + lon;
       const b = a + 1;
-      const c = a + segments + 1;
+      const c = a + segmentsLon + 1;
       const d = c + 1;
       indices.push(a, b, d);
       indices.push(a, d, c);
