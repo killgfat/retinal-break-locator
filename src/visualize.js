@@ -16,12 +16,10 @@ const DISC_TO_MACULA_ANGLE = 18.7;
 let scene, camera, renderer, controls;
 let currentTexture = null;
 let sphereMesh = null;
-let flatMesh = null;
 let corneaMesh = null;
 let referenceSphere = null;
 let limbusRing = null;
 let limbusArcLine = null;
-let displayMode = 'sphere';
 let currentEyeGeometry = null;
 let markerMeshes = {
   macula: null,
@@ -346,22 +344,10 @@ export function updateTexture(image, options = {}) {
     sphereMesh.material.dispose();
   }
   
-  if (flatMesh) {
-    scene.remove(flatMesh);
-    flatMesh.geometry.dispose();
-    flatMesh.material.dispose();
-  }
-  
   createReferenceSphere(currentEyeGeometry);
   createCornea(currentEyeGeometry);
   
-  if (displayMode === 'sphere' || displayMode === 'both') {
-    createSphereMesh(texture, image, retinalRadius, fov, maculaX, maculaY, discX, discY, imageAspect);
-  }
-  
-  if (displayMode === 'flat' || displayMode === 'both') {
-    createFlatMesh(texture, image);
-  }
+  createSphereMesh(texture, image, retinalRadius, fov, maculaX, maculaY, discX, discY, imageAspect);
 }
 
 function createSphereMesh(texture, image, radius, fov, maculaX, maculaY, discX, discY, imageAspect) {
@@ -377,72 +363,6 @@ function createSphereMesh(texture, image, radius, fov, maculaX, maculaY, discX, 
   
   sphereMesh = new THREE.Mesh(geometry, material);
   scene.add(sphereMesh);
-}
-
-function createFlatMesh(texture, image) {
-  const aspect = image.width / image.height;
-  const geometry = new THREE.PlaneGeometry(20 * aspect, 20);
-  
-  const material = new THREE.MeshStandardMaterial({
-    map: texture,
-    side: THREE.DoubleSide
-  });
-  
-  flatMesh = new THREE.Mesh(geometry, material);
-  flatMesh.position.x = 30;
-  scene.add(flatMesh);
-}
-
-/**
- * 设置显示模式
- * @param {string} mode - 'sphere' | 'flat' | 'both'
- */
-export function setDisplayMode(mode) {
-  displayMode = mode;
-  
-  if (currentTexture) {
-    const { 
-      texture, 
-      image, 
-      fov, 
-      axialLength, 
-      corneaDiameter,
-      corneaKValue,
-      maculaX, 
-      maculaY, 
-      discX, 
-      discY, 
-      imageAspect 
-    } = currentTexture;
-    
-    currentEyeGeometry = calculateEyeGeometry(axialLength, corneaDiameter, corneaKValue);
-    const retinalRadius = currentEyeGeometry.retinalRadius;
-    
-    if (sphereMesh) {
-      scene.remove(sphereMesh);
-      sphereMesh.geometry.dispose();
-      sphereMesh.material.dispose();
-      sphereMesh = null;
-    }
-    
-    if (flatMesh) {
-      scene.remove(flatMesh);
-      flatMesh.geometry.dispose();
-      flatMesh.material.dispose();
-      flatMesh = null;
-    }
-    
-    createReferenceSphere(currentEyeGeometry);
-    createCornea(currentEyeGeometry);
-    
-    if (mode === 'sphere' || mode === 'both') {
-      createSphereMesh(texture, image, retinalRadius, fov, maculaX, maculaY, discX, discY, imageAspect);
-    }
-    
-    if (mode === 'flat' || mode === 'both') {
-      createFlatMesh(texture, image);
-    }
-  }
 }
 
 /**
@@ -665,12 +585,6 @@ export function dispose() {
     scene.remove(sphereMesh);
     sphereMesh.geometry.dispose();
     sphereMesh.material.dispose();
-  }
-  
-  if (flatMesh) {
-    scene.remove(flatMesh);
-    flatMesh.geometry.dispose();
-    flatMesh.material.dispose();
   }
   
   if (corneaMesh) {

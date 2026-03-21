@@ -2,7 +2,7 @@
  * 眼底球面映射系统 - 主入口
  */
 
-import { initVisualization, updateTexture, setDisplayMode, dispose, setMarkers } from './visualize.js';
+import { initVisualization, updateTexture, dispose, setMarkers } from './visualize.js';
 import { 
   mapToSphere, 
   calculateRetinalParameters, 
@@ -35,7 +35,6 @@ const corneaDiameterInput = document.getElementById('cornea-diameter');
 const corneaKValueInput = document.getElementById('cornea-k-value');
 const corneaDValueInput = document.getElementById('cornea-d-value');
 const fovInput = document.getElementById('fov');
-const displayModeSelect = document.getElementById('display-mode');
 const imagePreview = document.getElementById('image-preview');
 const calcFromDiscBtn = document.getElementById('calc-from-disc-btn');
 const clearMarkersBtn = document.getElementById('clear-markers-btn');
@@ -108,10 +107,6 @@ function setupEventListeners() {
     updateInfo();
   });
   fovInput.addEventListener('change', updateInfo);
-  
-  displayModeSelect.addEventListener('change', (e) => {
-    setDisplayMode(e.target.value);
-  });
   
   document.querySelectorAll('.marker-btn').forEach(btn => {
     btn.addEventListener('click', () => {
