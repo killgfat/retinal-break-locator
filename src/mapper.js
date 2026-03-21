@@ -53,18 +53,16 @@ export function calculateEyeGeometry(axialLength = 24, anteriorChamberDepth = nu
   const acd = anteriorChamberDepth ?? ANATOMY.anteriorChamberDepth;
   const wtw = corneaDiameter ?? ANATOMY.corneaDiameter;
   
-  const corneaProtrusion = calculateCorneaProtrusion(wtw);
+  const retinalRadius = axialLength / 2;
   
-  const vitreousLength = axialLength - acd - ANATOMY.corneaThickness - corneaProtrusion;
-  
-  const retinalRadius = vitreousLength / 2 + corneaProtrusion / 2;
+  const corneaSag = calculateCorneaSag(wtw);
   
   const limbusToMaculaArc = calculateLimbusToMaculaArc(retinalRadius, acd, axialLength, wtw);
   
   return {
     axialLength,
     anteriorChamberDepth: acd,
-    corneaProtrusion,
+    corneaSag,
     retinalRadius,
     limbusToMaculaArc,
     corneaDiameter: wtw,
@@ -73,7 +71,7 @@ export function calculateEyeGeometry(axialLength = 24, anteriorChamberDepth = nu
   };
 }
 
-function calculateCorneaProtrusion(corneaDiameter) {
+function calculateCorneaSag(corneaDiameter) {
   const r = ANATOMY.corneaRadius;
   const d = corneaDiameter;
   const halfD = d / 2;
@@ -82,9 +80,7 @@ function calculateCorneaProtrusion(corneaDiameter) {
     return r;
   }
   
-  const h = r - Math.sqrt(r * r - halfD * halfD);
-  
-  return h + ANATOMY.corneaThickness;
+  return r - Math.sqrt(r * r - halfD * halfD);
 }
 
 function calculateLimbusToMaculaArc(retinalRadius, anteriorChamberDepth, axialLength, corneaDiameter) {
