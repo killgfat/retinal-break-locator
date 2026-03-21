@@ -375,6 +375,121 @@
       background: #333;
       margin: 15px 0;
     }
+    
+    @media (max-width: 1200px) {
+      .main-content {
+        grid-template-columns: 1fr 1fr;
+      }
+      
+      .panel:first-child {
+        grid-column: 1 / -1;
+      }
+    }
+    
+    @media (max-width: 768px) {
+      .container {
+        padding: 10px;
+      }
+      
+      header {
+        padding: 15px 0;
+        margin-bottom: 15px;
+      }
+      
+      h1 {
+        font-size: 1.4rem;
+      }
+      
+      .subtitle {
+        font-size: 0.8rem;
+      }
+      
+      .main-content {
+        grid-template-columns: 1fr;
+        gap: 15px;
+      }
+      
+      .panel {
+        padding: 15px;
+      }
+      
+      .panel h2 {
+        font-size: 1rem;
+      }
+      
+      .upload-area {
+        padding: 20px 10px;
+      }
+      
+      .upload-icon {
+        font-size: 28px;
+      }
+      
+      .control-group input,
+      .control-group select {
+        padding: 10px;
+        font-size: 16px;
+      }
+      
+      .btn {
+        padding: 12px 20px;
+        font-size: 1rem;
+      }
+      
+      .marker-btn {
+        padding: 10px 8px;
+        font-size: 0.85rem;
+        min-width: 70px;
+      }
+      
+      .marker-coord-item {
+        font-size: 0.85rem;
+      }
+      
+      #canvas-container {
+        height: 350px;
+      }
+      
+      .image-preview > div:first-child {
+        height: 300px;
+      }
+      
+      .info-item {
+        font-size: 0.8rem;
+      }
+      
+      .hole-info h3 {
+        font-size: 0.85rem;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      h1 {
+        font-size: 1.2rem;
+      }
+      
+      .subtitle {
+        font-size: 0.7rem;
+      }
+      
+      .marker-mode {
+        gap: 6px;
+      }
+      
+      .marker-btn {
+        padding: 8px 6px;
+        font-size: 0.75rem;
+        min-width: 60px;
+      }
+      
+      #canvas-container {
+        height: 280px;
+      }
+      
+      .image-preview > div:first-child {
+        height: 250px;
+      }
+    }
   </style>
 </head>
 <body>
