@@ -19,6 +19,7 @@ let sphereMesh = null;
 let flatMesh = null;
 let corneaMesh = null;
 let referenceSphere = null;
+let limbusRing = null;
 let displayMode = 'sphere';
 let currentEyeGeometry = null;
 let markerMeshes = {
@@ -165,6 +166,29 @@ function createCornea(eyeGeometry) {
     corneaMesh.material.dispose();
     corneaMesh = null;
   }
+  
+  if (limbusRing) {
+    scene.remove(limbusRing);
+    limbusRing.geometry.dispose();
+    limbusRing.material.dispose();
+    limbusRing = null;
+  }
+  
+  const { retinalRadius, corneaDiameter } = eyeGeometry;
+  const halfCorneaDiameter = corneaDiameter / 2;
+  
+  const zAtLimbus = Math.sqrt(retinalRadius * retinalRadius - halfCorneaDiameter * halfCorneaDiameter);
+  
+  const ringGeometry = new THREE.TorusGeometry(halfCorneaDiameter, 0.15, 16, 64);
+  const ringMaterial = new THREE.MeshBasicMaterial({
+    color: 0x00ff88,
+    transparent: true,
+    opacity: 0.8
+  });
+  limbusRing = new THREE.Mesh(ringGeometry, ringMaterial);
+  limbusRing.position.set(0, 0, zAtLimbus);
+  limbusRing.rotation.x = Math.PI / 2;
+  scene.add(limbusRing);
 }
 
 function onWindowResize() {
@@ -604,6 +628,12 @@ export function dispose() {
     scene.remove(corneaMesh);
     corneaMesh.geometry.dispose();
     corneaMesh.material.dispose();
+  }
+  
+  if (limbusRing) {
+    scene.remove(limbusRing);
+    limbusRing.geometry.dispose();
+    limbusRing.material.dispose();
   }
   
   if (referenceSphere) {
