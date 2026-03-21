@@ -179,15 +179,14 @@ function createCornea(eyeGeometry) {
   
   const zAtLimbus = Math.sqrt(retinalRadius * retinalRadius - halfCorneaDiameter * halfCorneaDiameter);
   
-  const ringGeometry = new THREE.TorusGeometry(halfCorneaDiameter, 0.15, 16, 64);
+  const ringGeometry = new THREE.TorusGeometry(halfCorneaDiameter, 0.08, 16, 64);
   const ringMaterial = new THREE.MeshBasicMaterial({
-    color: 0x00ff88,
+    color: 0x333366,
     transparent: true,
-    opacity: 0.8
+    opacity: 0.9
   });
   limbusRing = new THREE.Mesh(ringGeometry, ringMaterial);
   limbusRing.position.set(0, 0, zAtLimbus);
-  limbusRing.rotation.x = Math.PI / 2;
   scene.add(limbusRing);
 }
 
