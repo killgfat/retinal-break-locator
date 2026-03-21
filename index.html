@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>眼底球面映射系统</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+    }
+    
+    .container {
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    header {
+      text-align: center;
+      padding: 30px 0;
+      border-bottom: 1px solid #333;
+      margin-bottom: 30px;
+    }
+    
+    h1 {
+      font-size: 2rem;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    
+    .subtitle {
+      color: #888;
+      margin-top: 10px;
+    }
+    
+    .main-content {
+      display: grid;
+      grid-template-columns: 320px 1fr 1fr;
+      gap: 20px;
+    }
+    
+    .panel {
+      background: #16213e;
+      border-radius: 12px;
+      padding: 20px;
+    }
+    
+    .panel h2 {
+      font-size: 1.1rem;
+      margin-bottom: 15px;
+      color: #667eea;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .upload-area {
+      border: 2px dashed #444;
+      border-radius: 8px;
+      padding: 30px 15px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    
+    .upload-area:hover {
+      border-color: #667eea;
+      background: rgba(102, 126, 234, 0.1);
+    }
+    
+    .upload-area input {
+      display: none;
+    }
+    
+    .upload-icon {
+      font-size: 36px;
+      margin-bottom: 8px;
+    }
+    
+    .controls {
+      margin-top: 15px;
+    }
+    
+    .control-group {
+      margin-bottom: 12px;
+    }
+    
+    .control-group label {
+      display: block;
+      margin-bottom: 4px;
+      color: #aaa;
+      font-size: 0.85rem;
+    }
+    
+    .control-group input,
+    .control-group select {
+      width: 100%;
+      padding: 8px;
+      background: #0f0f23;
+      border: 1px solid #333;
+      border-radius: 6px;
+      color: #eee;
+      font-size: 0.9rem;
+    }
+    
+    .control-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    
+    .btn {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      width: 100%;
+      transition: transform 0.2s, opacity 0.2s;
+      margin-top: 8px;
+    }
+    
+    .btn:hover {
+      transform: translateY(-2px);
+    }
+    
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .btn-secondary {
+      background: #333;
+      margin-top: 6px;
+    }
+    
+    .btn-secondary:hover {
+      background: #444;
+    }
+    
+    #canvas-container {
+      width: 100%;
+      height: 500px;
+      background: #0f0f23;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    
+    .info-panel {
+      margin-top: 15px;
+      padding: 12px;
+      background: #0f0f23;
+      border-radius: 8px;
+    }
+    
+    .info-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid #333;
+      font-size: 0.85rem;
+    }
+    
+    .info-item:last-child {
+      border-bottom: none;
+    }
+    
+    .info-label {
+      color: #888;
+    }
+    
+    .info-value {
+      color: #667eea;
+      font-weight: 500;
+    }
+    
+    .loading {
+      display: none;
+      text-align: center;
+      padding: 15px;
+    }
+    
+    .loading.active {
+      display: block;
+    }
+    
+    .spinner {
+      border: 3px solid #333;
+      border-top: 3px solid #667eea;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 8px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .marker-section {
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px solid #333;
+    }
+    
+    .marker-mode {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    
+    .marker-btn {
+      flex: 1;
+      min-width: 80px;
+      padding: 8px 12px;
+      border: 2px solid #444;
+      background: transparent;
+      color: #aaa;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      transition: all 0.2s;
+    }
+    
+    .marker-btn.active {
+      border-color: #667eea;
+      color: #667eea;
+      background: rgba(102, 126, 234, 0.15);
+    }
+    
+    .marker-btn[data-marker="macula"].active {
+      border-color: #ff6b6b;
+      color: #ff6b6b;
+      background: rgba(255, 107, 107, 0.15);
+    }
+    
+    .marker-btn[data-marker="disc"].active {
+      border-color: #4ecdc4;
+      color: #4ecdc4;
+      background: rgba(78, 205, 196, 0.15);
+    }
+    
+    .marker-btn[data-marker="hole"].active {
+      border-color: #ffe66d;
+      color: #ffe66d;
+      background: rgba(255, 230, 109, 0.15);
+    }
+    
+    .marker-coords {
+      background: #0f0f23;
+      border-radius: 6px;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+    
+    .marker-coord-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 0;
+      font-size: 0.8rem;
+    }
+    
+    .marker-coord-item .label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .marker-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    
+    .marker-dot.macula { background: #ff6b6b; }
+    .marker-dot.disc { background: #4ecdc4; }
+    .marker-dot.hole { background: #ffe66d; }
+    
+    .marker-coord-item .value {
+      color: #888;
+      font-family: monospace;
+    }
+    
+    .image-preview {
+      position: relative;
+      background: #0f0f23;
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: crosshair;
+    }
+    
+    .image-preview img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    
+    .image-preview .marker-point {
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      border: 2px solid white;
+      pointer-events: none;
+      box-shadow: 0 0 8px rgba(0,0,0,0.5);
+    }
+    
+    .image-preview .marker-point.macula {
+      background: #ff6b6b;
+    }
+    
+    .image-preview .marker-point.disc {
+      background: #4ecdc4;
+    }
+    
+    .image-preview .marker-point.hole {
+      background: #ffe66d;
+    }
+    
+    .image-preview .marker-label {
+      position: absolute;
+      font-size: 10px;
+      color: white;
+      background: rgba(0,0,0,0.7);
+      padding: 2px 6px;
+      border-radius: 3px;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    
+    .hole-info {
+      margin-top: 10px;
+      padding: 10px;
+      background: rgba(255, 230, 109, 0.1);
+      border-radius: 6px;
+      border: 1px solid rgba(255, 230, 109, 0.3);
+      display: none;
+    }
+    
+    .hole-info.visible {
+      display: block;
+    }
+    
+    .hole-info h3 {
+      font-size: 0.9rem;
+      color: #ffe66d;
+      margin-bottom: 8px;
+    }
+    
+    .hole-info .info-item {
+      font-size: 0.8rem;
+    }
+    
+    .section-divider {
+      height: 1px;
+      background: #333;
+      margin: 15px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>眼底球面映射系统</h1>
+      <p class="subtitle">Optos SLO 图像 → 3D 球面可视化 | 支持黄斑/视盘/裂孔标记</p>
+    </header>
+    
+    <div class="main-content">
+      <!-- 左侧控制面板 -->
+      <div class="panel">
+        <h2>📤 上传图像</h2>
+        <div class="upload-area" id="upload-area">
+          <div class="upload-icon">🖼️</div>
+          <p>点击或拖拽上传</p>
+          <input type="file" id="file-input" accept="image/*">
+        </div>
+        
+        <div class="loading" id="loading">
+          <div class="spinner"></div>
+          <p>处理中...</p>
+        </div>
+        
+        <div class="controls">
+          <h2>⚙️ 眼球参数</h2>
+          
+          <div class="control-group">
+            <label>眼轴长度 (mm)</label>
+            <input type="number" id="axial-length" value="24" step="0.1" min="20" max="30">
+          </div>
+          
+          <div class="control-group">
+            <label>视场角 (°)</label>
+            <input type="number" id="fov" value="200" step="1" min="30" max="200">
+          </div>
+          
+          <div class="control-group">
+            <label>显示模式</label>
+            <select id="display-mode">
+              <option value="sphere">3D 球体</option>
+              <option value="flat">2D 展开</option>
+              <option value="both">同时显示</option>
+            </select>
+          </div>
+        </div>
+        
+        <div class="marker-section">
+          <h2>📍 标记点位置</h2>
+          <p style="font-size: 0.8rem; color: #888; margin-bottom: 10px;">
+            选择标记类型，在预览图上点击设置位置
+          </p>
+          
+          <div class="marker-mode">
+            <button class="marker-btn" data-marker="macula">🔴 黄斑中心</button>
+            <button class="marker-btn" data-marker="disc">🔵 视盘中心</button>
+            <button class="marker-btn" data-marker="hole">🟡 黄斑裂孔</button>
+          </div>
+          
+          <div class="marker-coords">
+            <div class="marker-coord-item">
+              <span class="label"><span class="marker-dot macula"></span> 黄斑中心</span>
+              <span class="value" id="macula-coords">(0.500, 0.500)</span>
+            </div>
+            <div class="marker-coord-item">
+              <span class="label"><span class="marker-dot disc"></span> 视盘中心</span>
+              <span class="value" id="disc-coords">未设置</span>
+            </div>
+            <div class="marker-coord-item">
+              <span class="label"><span class="marker-dot hole"></span> 黄斑裂孔</span>
+              <span class="value" id="hole-coords">未设置</span>
+            </div>
+            <div class="marker-coord-item" id="eye-side-row" style="display: none;">
+              <span class="label">👁️ 眼别</span>
+              <span class="value" id="eye-side" style="color: #ffe66d; font-weight: bold;">-</span>
+            </div>
+          </div>
+          
+          <button class="btn btn-secondary" id="calc-from-disc-btn" disabled>
+            从视盘推算黄斑位置
+          </button>
+          <button class="btn btn-secondary" id="clear-markers-btn">
+            清除所有标记
+          </button>
+        </div>
+        
+        <div class="hole-info" id="hole-info">
+          <h3>🟡 黄斑裂孔信息</h3>
+          <div class="info-item">
+            <span class="info-label">距黄斑中心</span>
+            <span class="info-value" id="hole-distance">-</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">角度方向</span>
+            <span class="info-value" id="hole-direction">-</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">球面坐标</span>
+            <span class="info-value" id="hole-sphere">-</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">角膜缘距离</span>
+            <span class="info-value" id="hole-limbus-distance">-</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">时钟位</span>
+            <span class="info-value" id="hole-clock-position">-</span>
+          </div>
+        </div>
+        
+        <button class="btn" id="process-btn" disabled>处理图像</button>
+        
+        <div class="info-panel" id="info-panel" style="display: none;">
+          <h2>ℹ️ 图像信息</h2>
+          <div class="info-item" id="preprocess-info" style="display: none; font-size: 0.8rem;">
+          </div>
+          <div class="info-item">
+            <span class="info-label">尺寸</span>
+            <span class="info-value" id="img-size">-</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">视网膜半径</span>
+            <span class="info-value" id="retina-radius">-</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">像素分辨率</span>
+            <span class="info-value" id="pixel-scale">-</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 中间图像预览 -->
+      <div class="panel">
+        <h2>🖼️ 图像预览 <span style="font-size: 0.8rem; color: #888; font-weight: normal;">(点击标记位置)</span></h2>
+        <div class="image-preview" id="image-preview">
+          <div style="height: 500px; display: flex; align-items: center; justify-content: center; color: #666;">
+            请上传眼底图像
+          </div>
+        </div>
+      </div>
+      
+      <!-- 右侧3D可视化 -->
+      <div class="panel">
+        <h2>🌐 3D 球面映射</h2>
+        <div id="canvas-container"></div>
+      </div>
+    </div>
+  </div>
+  
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
