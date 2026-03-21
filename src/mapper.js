@@ -50,16 +50,18 @@ export function calculateEyeGeometry(axialLength = 24, corneaDiameter = null, co
   const wtw = corneaDiameter ?? ANATOMY.corneaDiameter;
   const kValue = corneaKValue ?? ANATOMY.corneaRadius;
   
-  const retinalRadius = axialLength / 2;
-  
   const corneaSag = calculateCorneaSag(wtw, kValue);
   
-  const limbusToMaculaArc = calculateLimbusToMaculaArc(retinalRadius, axialLength, wtw);
+  const halfWtw = wtw / 2;
+  const rightSide = axialLength - corneaSag;
+  const scleralRadius = (rightSide * rightSide + halfWtw * halfWtw) / (2 * rightSide);
+  
+  const limbusToMaculaArc = calculateLimbusToMaculaArc(scleralRadius, axialLength, wtw);
   
   return {
     axialLength,
     corneaSag,
-    retinalRadius,
+    retinalRadius: scleralRadius,
     limbusToMaculaArc,
     corneaDiameter: wtw,
     corneaRadius: kValue,
