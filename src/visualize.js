@@ -81,49 +81,66 @@ function createReferenceSphere(eyeGeometry) {
     referenceSphere.material.dispose();
   }
   
-  const referenceGeometry = new THREE.SphereGeometry(eyeGeometry.retinalRadius, 32, 32);
-  const referenceMaterial = new THREE.MeshBasicMaterial({
+  const { retinalRadius, corneaRadius, corneaDiameter } = eyeGeometry;
+  
+  const geometry = createEyeballGeometry(retinalRadius, corneaRadius, corneaDiameter);
+  
+  const material = new THREE.MeshBasicMaterial({
     color: 0x333366,
     wireframe: true,
     transparent: true,
     opacity: 0.3
   });
-  referenceSphere = new THREE.Mesh(referenceGeometry, referenceMaterial);
+  referenceSphere = new THREE.Mesh(geometry, material);
   scene.add(referenceSphere);
 }
 
-function createCornea(eyeGeometry) {
-  if (corneaMesh) {
-    scene.remove(corneaMesh);
-    corneaMesh.geometry.dispose();
-    corneaMesh.material.dispose();
-  }
-  
-  const { corneaRadius, corneaDiameter, retinalRadius } = eyeGeometry;
-  const halfDiameter = corneaDiameter / 2;
-  
-  const phiLimit = Math.asin(halfDiameter / corneaRadius);
-  const segments = 64;
-  
+function createEyeballGeometry(retinalRadius, corneaRadius, corneaDiameter) {
   const geometry = new THREE.BufferGeometry();
   const vertices = [];
-  const normals = [];
   const indices = [];
+  
+  const segments = 64;
+  const halfCorneaDiameter = corneaDiameter / 2;
+  const corneaArcAngle = Math.asin(halfCorneaDiameter / corneaRadius);
+  const corneaCenterZ = retinalRadius + corneaRadius * Math.cos(corneaArcAngle);
   
   for (let i = 0; i <= segments; i++) {
     for (let j = 0; j <= segments; j++) {
-      const u = i / segments;
-      const v = j / segments;
+      const theta = (i / segments) * Math.PI;
+      const phi = (j / segments) * 2 * Math.PI;
       
-      const phi = u * phiLimit * 2 - phiLimit;
-      const theta = v * Math.PI / 2;
+      let x, y, z;
       
-      const x = corneaRadius * Math.sin(theta) * Math.cos(phi);
-      const y = corneaRadius * Math.sin(theta) * Math.sin(phi);
-      const z = -corneaRadius * Math.cos(theta);
+      const sineTheta = Math.sin(theta);
+      const cosineTheta = Math.cos(theta);
+      
+      if (theta <= Math.PI / 2) {
+        x = sineTheta * Math.cos(phi) * retinalRadius;
+        y = sineTheta * Math.sin(phi) * retinalRadius;
+        z = -cosineTheta * retinalRadius;
+      } else {
+        const corneaTheta = theta - Math.PI / 2;
+        const rAtTheta = halfCorneaDiameter * (corneaTheta / (Math.PI / 2));
+        const corneaThetaNormalized = corneaTheta / (Math.PI / 2);
+        
+        x = rAtTheta * Math.cos(phi);
+        y = rAtTheta * Math.sin(phi);
+        
+        if (rAtTheta <= halfCorneaDiameter) {
+          const localR = rAtTheta;
+          if (localR < corneaRadius) {
+            const sqrtPart = Math.sqrt(corneaRadius * corneaRadius - localR * localR);
+            z = corneaCenterZ - corneaRadius + sqrtPart;
+          } else {
+            z = corneaCenterZ - corneaRadius;
+          }
+        } else {
+          z = corneaCenterZ - corneaRadius;
+        }
+      }
       
       vertices.push(x, y, z);
-      normals.push(Math.sin(theta) * Math.cos(phi), Math.sin(theta) * Math.sin(phi), -Math.cos(theta));
     }
   }
   
@@ -139,25 +156,19 @@ function createCornea(eyeGeometry) {
   }
   
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   geometry.setIndex(indices);
+  geometry.computeVertexNormals();
   
-  const material = new THREE.MeshStandardMaterial({
-    color: 0x88ccff,
-    transparent: true,
-    opacity: 0.4,
-    side: THREE.DoubleSide,
-    roughness: 0.1,
-    metalness: 0.0
-  });
-  
-  corneaMesh = new THREE.Mesh(geometry, material);
-  
-  const corneaZOffset = retinalRadius + corneaRadius * (1 - Math.cos(phiLimit));
-  corneaMesh.position.set(0, 0, corneaZOffset);
-  corneaMesh.rotation.x = Math.PI;
-  
-  scene.add(corneaMesh);
+  return geometry;
+}
+
+function createCornea(eyeGeometry) {
+  if (corneaMesh) {
+    scene.remove(corneaMesh);
+    corneaMesh.geometry.dispose();
+    corneaMesh.material.dispose();
+    corneaMesh = null;
+  }
 }
 
 function onWindowResize() {
