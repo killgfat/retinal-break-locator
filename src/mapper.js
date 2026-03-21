@@ -24,7 +24,7 @@ const ANATOMY = {
   combinedDiscMaculaAngle: 18.7, // 视盘到黄斑的综合角度 (°)
   
   // 角膜参数
-  corneaDiameter: 11.0,       // 角膜直径 (mm), 水平11.7mm, 垂直10.6mm, 取平均
+  corneaDiameter: 11.7,       // 角膜直径 WTW (mm), 水平11.7mm, 垂直10.6mm, 范围 10.5-12.5mm
   corneaRadius: 7.8,          // 角膜前表面曲率半径 (mm), 范围 7.0-8.5mm
   corneaThickness: 0.5,       // 角膜中央厚度 (mm), 约 0.5mm
   
@@ -42,22 +42,24 @@ const ANATOMY = {
 
 /**
  * 计算眼球几何参数
- * 根据眼轴长度和前房深度计算更准确的眼球形状参数
+ * 根据眼轴长度、前房深度和角膜直径计算更准确的眼球形状参数
  * 
  * @param {number} axialLength - 眼轴长度 (mm)
  * @param {number} anteriorChamberDepth - 前房深度 (mm), 可选
+ * @param {number} corneaDiameter - 角膜直径 WTW (mm), 可选
  * @returns {Object} 眼球几何参数
  */
-export function calculateEyeGeometry(axialLength = 24, anteriorChamberDepth = null) {
+export function calculateEyeGeometry(axialLength = 24, anteriorChamberDepth = null, corneaDiameter = null) {
   const acd = anteriorChamberDepth ?? ANATOMY.anteriorChamberDepth;
+  const wtw = corneaDiameter ?? ANATOMY.corneaDiameter;
   
-  const corneaProtrusion = calculateCorneaProtrusion();
+  const corneaProtrusion = calculateCorneaProtrusion(wtw);
   
   const vitreousLength = axialLength - acd - ANATOMY.corneaThickness - corneaProtrusion;
   
   const retinalRadius = vitreousLength / 2 + corneaProtrusion / 2;
   
-  const limbusToMaculaArc = calculateLimbusToMaculaArc(retinalRadius, acd, axialLength);
+  const limbusToMaculaArc = calculateLimbusToMaculaArc(retinalRadius, acd, axialLength, wtw);
   
   return {
     axialLength,
@@ -65,15 +67,15 @@ export function calculateEyeGeometry(axialLength = 24, anteriorChamberDepth = nu
     corneaProtrusion,
     retinalRadius,
     limbusToMaculaArc,
-    corneaDiameter: ANATOMY.corneaDiameter,
+    corneaDiameter: wtw,
     corneaRadius: ANATOMY.corneaRadius,
     corneaThickness: ANATOMY.corneaThickness
   };
 }
 
-function calculateCorneaProtrusion() {
+function calculateCorneaProtrusion(corneaDiameter) {
   const r = ANATOMY.corneaRadius;
-  const d = ANATOMY.corneaDiameter;
+  const d = corneaDiameter;
   const halfD = d / 2;
   
   if (halfD >= r) {
@@ -85,12 +87,15 @@ function calculateCorneaProtrusion() {
   return h + ANATOMY.corneaThickness;
 }
 
-function calculateLimbusToMaculaArc(retinalRadius, anteriorChamberDepth, axialLength) {
-  const posteriorPoleToLimbus = axialLength - anteriorChamberDepth - ANATOMY.corneaThickness;
+function calculateLimbusToMaculaArc(retinalRadius, anteriorChamberDepth, axialLength, corneaDiameter) {
+  const halfWtw = corneaDiameter / 2;
+  const standardWtw = ANATOMY.corneaDiameter / 2;
   
   const standardRatio = ANATOMY.limbusToMaculaArc / (STANDARD_EYE.axialLength / 2);
   
-  return retinalRadius * standardRatio * (axialLength / STANDARD_EYE.axialLength);
+  const wtwAdjustment = halfWtw / standardWtw;
+  
+  return retinalRadius * standardRatio * (axialLength / STANDARD_EYE.axialLength) * wtwAdjustment;
 }
 
 /**
@@ -483,10 +488,11 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
  * @param {number} theta - 裂孔到黄斑的角度 (度)
  * @param {number} axialLength - 眼轴长度 (mm), 默认 24
  * @param {number} anteriorChamberDepth - 前房深度 (mm), 可选
+ * @param {number} corneaDiameter - 角膜直径 WTW (mm), 可选
  * @returns {Object} { arcToMaculaMm, limbusToBreakMm, eyeGeometry }
  */
-export function calculateLimbusDistance(theta, axialLength = 24, anteriorChamberDepth = null) {
-  const eyeGeometry = calculateEyeGeometry(axialLength, anteriorChamberDepth);
+export function calculateLimbusDistance(theta, axialLength = 24, anteriorChamberDepth = null, corneaDiameter = null) {
+  const eyeGeometry = calculateEyeGeometry(axialLength, anteriorChamberDepth, corneaDiameter);
   
   const R = eyeGeometry.retinalRadius;
   const arcToMaculaMm = R * theta * (Math.PI / 180);

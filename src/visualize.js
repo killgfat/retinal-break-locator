@@ -66,7 +66,7 @@ export function initVisualization() {
   directionalLight.position.set(0, 0, 20);
   scene.add(directionalLight);
   
-  currentEyeGeometry = calculateEyeGeometry(24, null);
+  currentEyeGeometry = calculateEyeGeometry(24, null, null);
   createReferenceSphere(currentEyeGeometry);
   createCornea(currentEyeGeometry);
   
@@ -313,13 +313,14 @@ export function updateTexture(image, options = {}) {
     fov = 200, 
     axialLength = 24, 
     anteriorChamberDepth = null,
+    corneaDiameter = null,
     maculaX = 0.5, 
     maculaY = 0.5, 
     discX = null, 
     discY = null 
   } = options;
   
-  currentEyeGeometry = calculateEyeGeometry(axialLength, anteriorChamberDepth);
+  currentEyeGeometry = calculateEyeGeometry(axialLength, anteriorChamberDepth, corneaDiameter);
   const retinalRadius = currentEyeGeometry.retinalRadius;
   const imageAspect = image.width / image.height;
   
@@ -331,6 +332,7 @@ export function updateTexture(image, options = {}) {
     fov, 
     axialLength, 
     anteriorChamberDepth,
+    corneaDiameter,
     maculaX, 
     maculaY, 
     discX, 
@@ -405,6 +407,7 @@ export function setDisplayMode(mode) {
       fov, 
       axialLength, 
       anteriorChamberDepth,
+      corneaDiameter,
       maculaX, 
       maculaY, 
       discX, 
@@ -412,7 +415,7 @@ export function setDisplayMode(mode) {
       imageAspect 
     } = currentTexture;
     
-    currentEyeGeometry = calculateEyeGeometry(axialLength, anteriorChamberDepth);
+    currentEyeGeometry = calculateEyeGeometry(axialLength, anteriorChamberDepth, corneaDiameter);
     const retinalRadius = currentEyeGeometry.retinalRadius;
     
     if (sphereMesh) {
@@ -462,7 +465,7 @@ export function setMarkers(markers) {
   currentMarkers = { ...markers };
   
   if (currentTexture && markers.macula) {
-    const { texture, image, fov, axialLength, anteriorChamberDepth, imageAspect } = currentTexture;
+    const { texture, image, fov, axialLength, anteriorChamberDepth, corneaDiameter, imageAspect } = currentTexture;
     const { x: maculaX, y: maculaY } = markers.macula;
     const discX = markers.disc ? markers.disc.x : null;
     const discY = markers.disc ? markers.disc.y : null;
@@ -489,7 +492,7 @@ export function setMarkers(markers) {
         sphereMesh = null;
       }
       
-      currentEyeGeometry = calculateEyeGeometry(axialLength, anteriorChamberDepth);
+      currentEyeGeometry = calculateEyeGeometry(axialLength, anteriorChamberDepth, corneaDiameter);
       const retinalRadius = currentEyeGeometry.retinalRadius;
       createSphereMesh(texture, image, retinalRadius, fov, maculaX, maculaY, discX, discY, imageAspect);
     }
