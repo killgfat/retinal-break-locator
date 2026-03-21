@@ -39,8 +39,9 @@ export function initVisualization() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0f0f23);
   
-  camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
-  camera.position.set(0, 0, 1);
+  camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
+  // 相机位于球体后方（黄斑侧），距离约 2.5 倍半径，能看到整个球体且黄斑在中心
+  camera.position.set(0, 0, -30);
   
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(width, height);
@@ -50,8 +51,10 @@ export function initVisualization() {
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.05;
-  controls.minDistance = 0.5;
-  controls.maxDistance = 20;
+  controls.minDistance = 15;
+  controls.maxDistance = 50;
+  // 控制器目标设在原点（球心），这样旋转时以球心为中心
+  controls.target.set(0, 0, 0);
   
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
   scene.add(ambientLight);
