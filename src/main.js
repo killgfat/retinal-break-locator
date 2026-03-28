@@ -155,20 +155,13 @@ function updateMarkerDisplay() {
   const maculaCoords = document.getElementById('macula-coords');
   const discCoords = document.getElementById('disc-coords');
   const holeCoords = document.getElementById('hole-coords');
-  const eyeSideRow = document.getElementById('eye-side-row');
-  const eyeSideEl = document.getElementById('eye-side');
   
   maculaCoords.textContent = `(${markers.macula.x.toFixed(3)}, ${markers.macula.y.toFixed(3)})`;
   
   if (markers.disc.set) {
     discCoords.textContent = `(${markers.disc.x.toFixed(3)}, ${markers.disc.y.toFixed(3)})`;
-    
-    const eyeSide = detectEyeSide(markers.macula, markers.disc);
-    eyeSideEl.textContent = eyeSide;
-    eyeSideRow.style.display = 'flex';
   } else {
     discCoords.textContent = '未设置';
-    eyeSideRow.style.display = 'none';
   }
   
   if (markers.hole.set) {
@@ -292,6 +285,16 @@ function updateHoleInfo() {
   document.getElementById('hole-sphere').textContent = `θ=${breakResult.angleDeg.toFixed(1)}°, φ=${phiDeg.toFixed(1)}°`;
   document.getElementById('hole-limbus-distance').textContent = `${limbusResult.limbusToBreakMm.toFixed(2)} mm`;
   document.getElementById('hole-clock-position').textContent = clockPosition;
+  
+  const eyeSideRow = document.getElementById('eye-side-row');
+  const eyeSideEl = document.getElementById('eye-side');
+  if (markers.disc.set && markers.macula.set) {
+    const eyeSideText = detectEyeSide(markers.macula, markers.disc);
+    eyeSideEl.textContent = eyeSideText;
+    eyeSideRow.style.display = 'flex';
+  } else {
+    eyeSideRow.style.display = 'none';
+  }
   
   holeInfoPanel.classList.add('visible');
 }
