@@ -377,7 +377,7 @@ export function getScene() {
  * @param {Object} markers - 标记点数据
  * @param {Object|null} markers.macula - 黄斑位置 {x, y} 归一化坐标
  * @param {Object|null} markers.disc - 视盘位置 {x, y} 归一化坐标
- * @param {Object|null} markers.hole - 黄斑裂孔位置 {x, y} 归一化坐标
+ * @param {Object|null} markers.hole - 视网膜裂孔位置 {x, y} 归一化坐标
  */
 export function setMarkers(markers) {
   const previousMacula = currentMarkers.macula;

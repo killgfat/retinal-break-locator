@@ -19,7 +19,7 @@ let currentImage = null;
 let currentImageData = null;
 
 const markers = {
-  macula: { x: 0.5, y: 0.5, set: true },
+  macula: { x: 0.5, y: 0.5, set: false },
   disc: { x: null, y: null, set: false },
   hole: { x: null, y: null, set: false }
 };
@@ -315,7 +315,7 @@ function calculateMaculaFromDiscPosition() {
 }
 
 function clearAllMarkers() {
-  markers.macula = { x: 0.5, y: 0.5, set: true };
+  markers.macula = { x: 0.5, y: 0.5, set: false };
   markers.disc = { x: null, y: null, set: false };
   markers.hole = { x: null, y: null, set: false };
   

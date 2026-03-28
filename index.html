@@ -531,47 +531,10 @@
           </div>
         </div>
         
-        <div class="marker-section">
-          <h2>📍 标记点位置</h2>
-          <p style="font-size: 0.8rem; color: #888; margin-bottom: 10px;">
-            选择标记类型，在预览图上点击设置位置
-          </p>
-          
-          <div class="marker-mode">
-            <button class="marker-btn" data-marker="macula">🔴 黄斑中心</button>
-            <button class="marker-btn" data-marker="disc">🔵 视盘中心</button>
-            <button class="marker-btn" data-marker="hole">🟡 黄斑裂孔</button>
-          </div>
-          
-          <div class="marker-coords">
-            <div class="marker-coord-item">
-              <span class="label"><span class="marker-dot macula"></span> 黄斑中心</span>
-              <span class="value" id="macula-coords">(0.500, 0.500)</span>
-            </div>
-            <div class="marker-coord-item">
-              <span class="label"><span class="marker-dot disc"></span> 视盘中心</span>
-              <span class="value" id="disc-coords">未设置</span>
-            </div>
-            <div class="marker-coord-item">
-              <span class="label"><span class="marker-dot hole"></span> 黄斑裂孔</span>
-              <span class="value" id="hole-coords">未设置</span>
-            </div>
-            <div class="marker-coord-item" id="eye-side-row" style="display: none;">
-              <span class="label">👁️ 眼别</span>
-              <span class="value" id="eye-side" style="color: #ffe66d; font-weight: bold;">-</span>
-            </div>
-          </div>
-          
-          <button class="btn btn-secondary" id="calc-from-disc-btn" disabled>
-            从视盘推算黄斑位置
-          </button>
-          <button class="btn btn-secondary" id="clear-markers-btn">
-            清除所有标记
-          </button>
-        </div>
+
         
         <div class="hole-info" id="hole-info">
-          <h3>🟡 黄斑裂孔信息</h3>
+          <h3>🟡 视网膜裂孔信息</h3>
           <div class="info-item">
             <span class="info-label">距黄斑中心</span>
             <span class="info-value" id="hole-distance">-</span>
@@ -618,6 +581,43 @@
       <!-- 中间图像预览 -->
       <div class="panel">
         <h2>🖼️ 图像预览 <span style="font-size: 0.8rem; color: #888; font-weight: normal;">(点击标记位置)</span></h2>
+        
+        <div class="marker-section" style="margin-bottom: 15px;">
+          <div class="marker-mode">
+            <button class="marker-btn" data-marker="macula">🔴 黄斑中心</button>
+            <button class="marker-btn" data-marker="disc">🔵 视盘中心</button>
+            <button class="marker-btn" data-marker="hole">🟡 视网膜裂孔</button>
+          </div>
+          
+          <div class="marker-coords">
+            <div class="marker-coord-item">
+              <span class="label"><span class="marker-dot macula"></span> 黄斑中心</span>
+              <span class="value" id="macula-coords">(0.500, 0.500)</span>
+            </div>
+            <div class="marker-coord-item">
+              <span class="label"><span class="marker-dot disc"></span> 视盘中心</span>
+              <span class="value" id="disc-coords">未设置</span>
+            </div>
+            <div class="marker-coord-item">
+              <span class="label"><span class="marker-dot hole"></span> 视网膜裂孔</span>
+              <span class="value" id="hole-coords">未设置</span>
+            </div>
+            <div class="marker-coord-item" id="eye-side-row" style="display: none;">
+              <span class="label">👁️ 眼别</span>
+              <span class="value" id="eye-side" style="color: #ffe66d; font-weight: bold;">-</span>
+            </div>
+          </div>
+          
+          <div style="display: flex; gap: 8px; margin-top: 10px;">
+            <button class="btn btn-secondary" id="calc-from-disc-btn" disabled style="flex: 1; margin-top: 0;">
+              从视盘推算黄斑位置
+            </button>
+            <button class="btn btn-secondary" id="clear-markers-btn" style="flex: 1; margin-top: 0;">
+              清除所有标记
+            </button>
+          </div>
+        </div>
+        
         <div class="image-preview" id="image-preview">
           <div class="image-placeholder">
             请上传眼底图像
