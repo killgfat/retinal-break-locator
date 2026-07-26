@@ -4,11 +4,8 @@
 
 import { initVisualization, updateTexture, dispose, setMarkers } from './visualize.js';
 import { 
-  mapToSphere, 
   calculateRetinalParameters, 
   calculateMaculaFromDisc,
-  imageToSphere,
-  getAnatomyReference,
   calculateBreakToMacula,
   calculateLimbusDistance,
   getClockHourPosition,
@@ -262,7 +259,7 @@ function updateHoleInfo() {
     markers.hole.y,
     macula,
     disc,
-    { axialLength, fov, imageAspect }
+    { axialLength, fov, imageAspect, corneaDiameter, corneaKValue }
   );
   
   const limbusResult = calculateLimbusDistance(breakResult.angleDeg, axialLength, corneaDiameter, corneaKValue);
@@ -270,15 +267,18 @@ function updateHoleInfo() {
   const clockPosition = getClockHourPosition(breakResult.phi, eyeSide);
   
   const phiDeg = breakResult.phiDeg;
+  // 右眼: phi=0(图像右)=鼻侧, phi=±180(图像左)=颞侧
+  // 左眼: phi=0(图像右)=颞侧, phi=±180(图像左)=鼻侧
+  const nasalIsRight = eyeSide === 'right';
   let direction = '';
-  if (Math.abs(phiDeg) < 22.5) direction = '颞侧';
-  else if (Math.abs(phiDeg - 90) < 22.5) direction = '上方';
+  if (Math.abs(phiDeg - 90) < 22.5) direction = '上方';
   else if (Math.abs(phiDeg + 90) < 22.5) direction = '下方';
-  else if (Math.abs(phiDeg - 180) < 22.5 || Math.abs(phiDeg + 180) < 22.5) direction = '鼻侧';
-  else if (phiDeg > 0 && phiDeg < 90) direction = '颞上';
-  else if (phiDeg > 90) direction = '鼻上';
-  else if (phiDeg < 0 && phiDeg > -90) direction = '颞下';
-  else direction = '鼻下';
+  else if (Math.abs(phiDeg) < 22.5) direction = nasalIsRight ? '鼻侧' : '颞侧';
+  else if (Math.abs(phiDeg - 180) < 22.5 || Math.abs(phiDeg + 180) < 22.5) direction = nasalIsRight ? '颞侧' : '鼻侧';
+  else if (phiDeg > 0 && phiDeg < 90) direction = nasalIsRight ? '鼻上' : '颞上';
+  else if (phiDeg > 90) direction = nasalIsRight ? '颞上' : '鼻上';
+  else if (phiDeg < 0 && phiDeg > -90) direction = nasalIsRight ? '鼻下' : '颞下';
+  else direction = nasalIsRight ? '颞下' : '鼻下';
   
   document.getElementById('hole-distance').textContent = `${breakResult.distanceMm.toFixed(2)} mm (${breakResult.angleDeg.toFixed(1)}°)`;
   document.getElementById('hole-direction').textContent = `黄斑${direction}`;
@@ -441,18 +441,6 @@ function processImage() {
       const corneaDiameter = getCorneaDiameter();
       const corneaKValue = getCorneaKValue();
       const fov = parseFloat(fovInput.value) || 200;
-      
-      const options = {
-        maculaX: markers.macula.x,
-        maculaY: markers.macula.y
-      };
-      
-      if (markers.disc.set) {
-        options.discX = markers.disc.x;
-        options.discY = markers.disc.y;
-      }
-      
-      const sphereData = mapToSphere(currentImage, axialLength, fov, options);
       
       updateTexture(currentImage, { 
         fov, 

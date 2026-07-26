@@ -8,15 +8,8 @@
  * - Optos 200° SLO: 图像中心是相机光轴，不一定是黄斑位置
  */
 
-// 标准眼参数
-const STANDARD_EYE = {
-  axialLength: 24,      // 眼轴长度 (mm)
-  retinalRadius: 12,    // 视网膜半径 (mm) = 眼轴/2 (简化模型)
-  fov: 200              // Optos 视场角 (度)
-};
-
 // 解剖学参考数据
-const ANATOMY = {
+export const ANATOMY = {
   // 视盘相对于黄斑的位置 (从黄斑看向视盘)
   discToMaculaAngle: 17,      // 视盘位于黄斑鼻侧约17°
   discToMaculaVertical: 7.76, // 视盘位于黄斑上方约7.76° (disc-fovea angle)
@@ -27,10 +20,6 @@ const ANATOMY = {
   corneaDiameter: 11.7,       // 角膜直径 WTW (mm), 水平11.7mm, 垂直10.6mm, 范围 10.5-12.5mm
   corneaRadius: 7.8,          // 角膜曲率半径 K值 (mm), 范围 7.0-8.5mm
   corneaThickness: 0.5,       // 角膜中央厚度 (mm), 约 0.5mm
-  
-  // 角膜缘位置 (角膜与巩膜交界处)
-  // 角膜缘到黄斑的弧长距离 (mm)
-  limbusToMaculaArc: 30.5,    // 角膜缘到黄斑的弧长 (24mm眼轴)
   
   // 视盘大小 (变异大，仅供参考)
   discHorizontalDiameter: 1.79, // mm, 范围 0.91-2.76
@@ -82,13 +71,9 @@ function calculateCorneaSag(corneaDiameter, corneaRadius) {
 
 function calculateLimbusToMaculaArc(retinalRadius, axialLength, corneaDiameter) {
   const halfWtw = corneaDiameter / 2;
-  const standardWtw = ANATOMY.corneaDiameter / 2;
-  
-  const standardRatio = ANATOMY.limbusToMaculaArc / (STANDARD_EYE.axialLength / 2);
-  
-  const wtwAdjustment = halfWtw / standardWtw;
-  
-  return retinalRadius * standardRatio * (axialLength / STANDARD_EYE.axialLength) * wtwAdjustment;
+  const zAtLimbus = Math.sqrt(retinalRadius * retinalRadius - halfWtw * halfWtw);
+  const thetaLimbus = Math.acos(-zAtLimbus / retinalRadius);
+  return retinalRadius * thetaLimbus;
 }
 
 /**
@@ -99,7 +84,8 @@ function calculateLimbusToMaculaArc(retinalRadius, axialLength, corneaDiameter) 
  * @returns {Object} 视网膜参数
  */
 export function calculateRetinalParameters(axialLength = 24, fov = 200, imageWidth = 2000) {
-  const retinalRadius = axialLength / 2;
+  const eyeGeometry = calculateEyeGeometry(axialLength);
+  const retinalRadius = eyeGeometry.retinalRadius;
   
   // 弧长 = R × θ (弧度)
   // 200° FOV 对应的视网膜弧长
@@ -162,8 +148,7 @@ export function imageToSphere(x, y, axialLength = 24, fov = 200, options = {}) {
   // 注意: 图像坐标系 y 轴向下，需要翻转以匹配解剖学坐标系
   const phi = Math.atan2(-dy, dx); // 负号使上方为正
   
-  // 视网膜半径
-  const R = axialLength / 2;
+  const R = calculateEyeGeometry(axialLength).retinalRadius;
   
   // 球面坐标转笛卡尔坐标
   // 黄斑在后极，所以 theta=0 时 z=R (朝向观察者)
@@ -386,7 +371,7 @@ export function getAnatomyReference() {
  * @returns {Object} 视盘球面坐标 {theta, phi, x, y, z}
  */
 export function getTheoreticalDiscPosition(axialLength = 24) {
-  const R = axialLength / 2;
+  const R = calculateEyeGeometry(axialLength).retinalRadius;
   
   // 视盘相对于黄斑的角度
   const theta = ANATOMY.discToMaculaAngle * (Math.PI / 180);
@@ -417,7 +402,7 @@ export function getTheoreticalDiscPosition(axialLength = 24) {
  * @returns {Object} {distanceMm, angleDeg, theta, phi}
  */
 export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {}) {
-  const { axialLength = 24, fov = 200, imageAspect = 1 } = options;
+  const { axialLength = 24, fov = 200, imageAspect = 1, corneaDiameter = null, corneaKValue = null } = options;
   
   const maculaX = macula?.x ?? 0.5;
   const maculaY = macula?.y ?? 0.5;
@@ -459,8 +444,7 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
   const angleDeg = r * calibratedMaxAngle;
   const theta = angleDeg * (Math.PI / 180);
   
-  // 视网膜半径
-  const R = axialLength / 2;
+  const R = calculateEyeGeometry(axialLength, corneaDiameter, corneaKValue).retinalRadius;
   
   // 弧长距离 (mm) = R * theta (弧度)
   const distanceMm = R * theta;

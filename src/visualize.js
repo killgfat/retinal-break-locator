@@ -9,9 +9,9 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { calculateEyeGeometry } from './mapper.js';
+import { calculateEyeGeometry, ANATOMY } from './mapper.js';
 
-const DISC_TO_MACULA_ANGLE = 18.7;
+const DISC_TO_MACULA_ANGLE = ANATOMY.combinedDiscMaculaAngle;
 
 let scene, camera, renderer, controls;
 let currentTexture = null;

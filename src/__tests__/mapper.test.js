@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   calculateRetinalParameters,
+  calculateEyeGeometry,
   imageToSphere,
   calculateMaculaFromDisc,
   mapToSphere,
@@ -17,9 +18,10 @@ describe('mapper.js', () => {
   describe('calculateRetinalParameters', () => {
     it('should return correct parameters for standard eye', () => {
       const params = calculateRetinalParameters(24, 200, 2000);
+      const expectedR = calculateEyeGeometry(24).retinalRadius;
       
       expect(params.axialLength).toBe(24);
-      expect(params.retinalRadius).toBe(12);
+      expect(params.retinalRadius).toBeCloseTo(expectedR, 5);
       expect(params.fov).toBe(200);
       expect(params.degPerPixel).toBe(0.1);
     });
@@ -28,9 +30,10 @@ describe('mapper.js', () => {
   describe('imageToSphere', () => {
     it('should map center to posterior pole', () => {
       const result = imageToSphere(0.5, 0.5, 24, 200, { maculaX: 0.5, maculaY: 0.5 });
+      const expectedR = calculateEyeGeometry(24).retinalRadius;
       
       expect(result.theta).toBe(0);
-      expect(result.z).toBe(12);
+      expect(result.z).toBeCloseTo(expectedR, 5);
     });
 
     it('should calculate correct angle for offset point', () => {
@@ -149,21 +152,22 @@ describe('mapper.js', () => {
   });
 
   describe('calculateLimbusDistance', () => {
-    it('should return ~30.5mm for theta=0 (break at macula)', () => {
+    it('should return limbusToMaculaArc for theta=0 (break at macula)', () => {
       const result = calculateLimbusDistance(0);
+      const eyeGeometry = calculateEyeGeometry(24);
       
       expect(result.arcToMaculaMm).toBe(0);
-      expect(result.limbusToBreakMm).toBeCloseTo(30.5, 1);
+      expect(result.limbusToBreakMm).toBeCloseTo(eyeGeometry.limbusToMaculaArc, 5);
     });
 
     it('should calculate arc to macula correctly for 90 degrees', () => {
       const result = calculateLimbusDistance(90);
+      const eyeGeometry = calculateEyeGeometry(24);
+      const R = eyeGeometry.retinalRadius;
       
-      // R = 12mm, theta = 90deg
-      // arcToMaculaMm = 12 * 90 * (π/180) = 12 * π/2 = ~18.85mm
-      expect(result.arcToMaculaMm).toBeCloseTo(18.85, 1);
-      // limbusToBreak = 30.5 - 18.85 = ~11.65mm
-      expect(result.limbusToBreakMm).toBeCloseTo(11.65, 1);
+      const expectedArc = R * 90 * (Math.PI / 180);
+      expect(result.arcToMaculaMm).toBeCloseTo(expectedArc, 5);
+      expect(result.limbusToBreakMm).toBeCloseTo(eyeGeometry.limbusToMaculaArc - expectedArc, 5);
     });
 
     it('should use custom axial length', () => {
@@ -176,11 +180,12 @@ describe('mapper.js', () => {
 
     it('should handle 45 degree angle', () => {
       const result = calculateLimbusDistance(45);
+      const eyeGeometry = calculateEyeGeometry(24);
+      const R = eyeGeometry.retinalRadius;
       
-      // R = 12mm, theta = 45deg
-      // arcToMaculaMm = 12 * 45 * (π/180) = 12 * π/4 = ~9.42mm
-      expect(result.arcToMaculaMm).toBeCloseTo(9.42, 1);
-      expect(result.limbusToBreakMm).toBeCloseTo(21.08, 1);
+      const expectedArc = R * 45 * (Math.PI / 180);
+      expect(result.arcToMaculaMm).toBeCloseTo(expectedArc, 5);
+      expect(result.limbusToBreakMm).toBeCloseTo(eyeGeometry.limbusToMaculaArc - expectedArc, 5);
     });
   });
 
