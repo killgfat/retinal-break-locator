@@ -3,13 +3,14 @@
  */
 
 import { initVisualization, updateTexture, dispose, setMarkers } from './visualize.js';
-import { 
-  calculateRetinalParameters, 
+import {
+  calculateRetinalParameters,
   calculateMaculaFromDisc,
   calculateBreakToMacula,
   calculateLimbusDistance,
   getClockHourPosition,
-  calculateEyeGeometry
+  calculateEyeGeometry,
+  detectEyeSide
 } from './mapper.js';
 
 let currentImage = null;
@@ -32,6 +33,8 @@ const corneaDiameterInput = document.getElementById('cornea-diameter');
 const corneaKValueInput = document.getElementById('cornea-k-value');
 const corneaDValueInput = document.getElementById('cornea-d-value');
 const fovInput = document.getElementById('fov');
+const eyeSideSelect = document.getElementById('eye-side-select');
+const projectionSelect = document.getElementById('projection-select');
 const imagePreview = document.getElementById('image-preview');
 const calcFromDiscBtn = document.getElementById('calc-from-disc-btn');
 const clearMarkersBtn = document.getElementById('clear-markers-btn');
@@ -104,7 +107,9 @@ function setupEventListeners() {
     updateInfo();
   });
   fovInput.addEventListener('change', updateInfo);
-  
+  eyeSideSelect.addEventListener('change', updateInfo);
+  projectionSelect.addEventListener('change', updateInfo);
+
   document.querySelectorAll('.marker-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const markerType = btn.dataset.marker;
@@ -168,21 +173,48 @@ function updateMarkerDisplay() {
   }
 }
 
-function detectEyeSide(macula, disc) {
-  const dx = disc.x - macula.x;
-  
-  if (Math.abs(dx) < 0.05) {
-    return '无法判断 (视盘与黄斑水平位置接近)';
+/**
+ * 解析当前眼别。手动选择优先;'auto' 时由视盘相对黄斑的位置判断。
+ * @returns {{side: string, source: string}} side: 'right'|'left', source: 'manual'|'auto'|'default'
+ */
+function resolveEyeSide() {
+  const manual = eyeSideSelect.value;
+  if (manual === 'right' || manual === 'left') {
+    return { side: manual, source: 'manual' };
   }
-  
-  // 眼底图像中: 视盘在鼻侧
-  // - 右眼: 鼻侧在图像右侧 (disc.x > macula.x)
-  // - 左眼: 鼻侧在图像左侧 (disc.x < macula.x)
-  if (dx > 0) {
-    return '右眼 (OD)';
-  } else {
-    return '左眼 (OS)';
+
+  if (markers.disc.set && markers.macula.set) {
+    const detected = detectEyeSide(markers.macula, markers.disc);
+    if (detected) return { side: detected, source: 'auto' };
   }
+
+  return { side: 'right', source: 'default' };
+}
+
+function eyeSideLabel(side) {
+  return side === 'right' ? '右眼 (OD)' : '左眼 (OS)';
+}
+
+/** 汇总当前所有眼球/投影参数,供 mapper 与 visualize 共用 */
+function getGeometryOptions() {
+  return {
+    axialLength: parseFloat(axialLengthInput.value) || 24,
+    corneaDiameter: getCorneaDiameter(),
+    corneaKValue: getCorneaKValue(),
+    fov: parseFloat(fovInput.value) || 200,
+    projection: projectionSelect.value
+  };
+}
+
+/** 汇总传给 visualize.updateTexture 的完整参数 */
+function getTextureOptions() {
+  return {
+    ...getGeometryOptions(),
+    maculaX: markers.macula.x,
+    maculaY: markers.macula.y,
+    discX: markers.disc.set ? markers.disc.x : null,
+    discY: markers.disc.set ? markers.disc.y : null
+  };
 }
 
 function updatePreviewMarkers() {
@@ -238,34 +270,34 @@ function updateHoleInfo() {
     return;
   }
   
-  const fov = parseFloat(fovInput.value) || 200;
-  const axialLength = parseFloat(axialLengthInput.value) || 24;
-  const corneaDiameter = getCorneaDiameter();
-  const corneaKValue = getCorneaKValue();
+  const geo = getGeometryOptions();
+  const { axialLength, corneaDiameter, corneaKValue } = geo;
   const imageAspect = currentImage ? currentImage.width / currentImage.height : 1;
-  
-  let eyeSide = 'right';
-  if (markers.disc.set && markers.macula.set) {
-    const dx = markers.disc.x - markers.macula.x;
-    if (dx > 0.05) eyeSide = 'right';
-    else if (dx < -0.05) eyeSide = 'left';
-  }
-  
+
+  const { side: eyeSide } = resolveEyeSide();
+
   const macula = { x: markers.macula.x, y: markers.macula.y };
   const disc = markers.disc.set ? { x: markers.disc.x, y: markers.disc.y } : undefined;
-  
+
   const breakResult = calculateBreakToMacula(
     markers.hole.x,
     markers.hole.y,
     macula,
     disc,
-    { axialLength, fov, imageAspect, corneaDiameter, corneaKValue }
+    { ...geo, imageAspect }
   );
-  
-  const limbusResult = calculateLimbusDistance(breakResult.angleDeg, axialLength, corneaDiameter, corneaKValue);
-  
-  const clockPosition = getClockHourPosition(breakResult.phi, eyeSide);
-  
+
+  // angle alpha 子午线修正需要方位角与眼别
+  const limbusResult = calculateLimbusDistance(
+    breakResult.angleDeg,
+    axialLength,
+    corneaDiameter,
+    corneaKValue,
+    { phiDeg: breakResult.phiDeg, eyeSide }
+  );
+
+  const clockPosition = getClockHourPosition(breakResult.phi);
+
   const phiDeg = breakResult.phiDeg;
   // 右眼: phi=0(图像右)=鼻侧, phi=±180(图像左)=颞侧
   // 左眼: phi=0(图像右)=颞侧, phi=±180(图像左)=鼻侧
@@ -280,41 +312,53 @@ function updateHoleInfo() {
   else if (phiDeg < 0 && phiDeg > -90) direction = nasalIsRight ? '鼻下' : '颞下';
   else direction = nasalIsRight ? '颞下' : '鼻下';
   
+  const calibNote = breakResult.calibration.method === 'disc' ? '盘-斑标定' : '⚠ 未标定(用标称FOV)';
+
   document.getElementById('hole-distance').textContent = `${breakResult.distanceMm.toFixed(2)} mm (${breakResult.angleDeg.toFixed(1)}°)`;
   document.getElementById('hole-direction').textContent = `黄斑${direction}`;
-  document.getElementById('hole-sphere').textContent = `θ=${breakResult.angleDeg.toFixed(1)}°, φ=${phiDeg.toFixed(1)}°`;
-  document.getElementById('hole-limbus-distance').textContent = `${limbusResult.limbusToBreakMm.toFixed(2)} mm`;
+  document.getElementById('hole-sphere').textContent =
+    `θ=${breakResult.angleDeg.toFixed(1)}° (视角${breakResult.fieldAngleDeg.toFixed(1)}°), φ=${phiDeg.toFixed(1)}° · ${calibNote}`;
+  document.getElementById('hole-limbus-distance').textContent = `${limbusResult.limbusToBreakExternalMm.toFixed(2)} mm`;
+  document.getElementById('hole-limbus-distance-inner').textContent = `${limbusResult.limbusToBreakMm.toFixed(2)} mm`;
   document.getElementById('hole-clock-position').textContent = clockPosition;
-  
+
   const eyeSideRow = document.getElementById('eye-side-row');
   const eyeSideEl = document.getElementById('eye-side');
-  if (markers.disc.set && markers.macula.set) {
-    const eyeSideText = detectEyeSide(markers.macula, markers.disc);
-    eyeSideEl.textContent = eyeSideText;
-    eyeSideRow.style.display = 'flex';
-  } else {
-    eyeSideRow.style.display = 'none';
-  }
-  
+  const resolved = resolveEyeSide();
+  const sourceNote = { manual: '手动指定', auto: '自动判断', default: '⚠ 默认值,请指定' }[resolved.source];
+  eyeSideEl.textContent = `${eyeSideLabel(resolved.side)} · ${sourceNote}`;
+  eyeSideRow.style.display = 'flex';
+
   holeInfoPanel.classList.add('visible');
 }
 
 function calculateMaculaFromDiscPosition() {
   if (!markers.disc.set || !currentImage) return;
   
-  const fov = parseFloat(fovInput.value) || 200;
+  // 由视盘推算黄斑时,眼别决定颞侧在图像的哪一边,而此时还没有黄斑可供自动判断,
+  // 所以必须由用户显式指定。
+  if (eyeSideSelect.value === 'auto') {
+    showError('请先在「眼球参数」中指定眼别(左眼/右眼),再由视盘推算黄斑位置。\n\n黄斑位于视盘颞侧,而颞侧在图像的哪一边取决于眼别。');
+    return;
+  }
+
+  const geo = getGeometryOptions();
   const result = calculateMaculaFromDisc(
-    markers.disc.x, 
-    markers.disc.y, 
-    fov, 
-    currentImage.width, 
-    currentImage.height
+    markers.disc.x,
+    markers.disc.y,
+    geo.fov,
+    currentImage.width,
+    currentImage.height,
+    eyeSideSelect.value,
+    { projection: geo.projection, axialLength: geo.axialLength,
+      corneaDiameter: geo.corneaDiameter, corneaKValue: geo.corneaKValue }
   );
-  
+
   markers.macula = { x: result.maculaX, y: result.maculaY, set: true };
-  
+
   updateMarkerDisplay();
   updatePreviewMarkers();
+  updateHoleInfo();
 }
 
 function clearAllMarkers() {
@@ -373,57 +417,34 @@ function finishImageLoad() {
   
   imagePreview.innerHTML = `<img src="${currentImageData}" alt="预览图像">`;
   updatePreviewMarkers();
-  
-  const axialLength = parseFloat(axialLengthInput.value) || 24;
-  const corneaDiameter = getCorneaDiameter();
-  const corneaKValue = getCorneaKValue();
-  const fov = parseFloat(fovInput.value) || 200;
-  updateTexture(currentImage, { 
-    fov, 
-    axialLength,
-    corneaDiameter,
-    corneaKValue,
-    maculaX: markers.macula.x,
-    maculaY: markers.macula.y,
-    discX: markers.disc.set ? markers.disc.x : null,
-    discY: markers.disc.set ? markers.disc.y : null
-  });
+
+  updateTexture(currentImage, getTextureOptions());
   updateVisualizationMarkers();
-  
+
   loading.classList.remove('active');
   document.querySelector('.loading p').textContent = '处理中...';
 }
 
 function updateInfo() {
-  const axialLength = parseFloat(axialLengthInput.value) || 24;
-  const corneaDiameter = getCorneaDiameter();
-  const corneaKValue = getCorneaKValue();
-  const fov = parseFloat(fovInput.value) || 200;
+  const geo = getGeometryOptions();
   const imageWidth = currentImage ? currentImage.width : 2000;
-  
-  const params = calculateRetinalParameters(axialLength, fov, imageWidth);
-  const eyeGeometry = calculateEyeGeometry(axialLength, corneaDiameter, corneaKValue);
-  
+
+  const params = calculateRetinalParameters(geo.axialLength, geo.fov, imageWidth, {
+    corneaDiameter: geo.corneaDiameter,
+    corneaKValue: geo.corneaKValue,
+    projection: geo.projection
+  });
+  const eyeGeometry = calculateEyeGeometry(geo.axialLength, geo.corneaDiameter, geo.corneaKValue);
+
   document.getElementById('retina-radius').textContent = `${eyeGeometry.retinalRadius.toFixed(2)} mm`;
-  document.getElementById('pixel-scale').textContent = `${params.mmPerPixel.toFixed(4)} mm/px`;
-  
+  // 中心处局部尺度比全场平均值更有意义(周边被显著压缩)
+  document.getElementById('pixel-scale').textContent =
+    `${params.mmPerPixelCenter.toFixed(4)} mm/px (中心) · 覆盖 ${(params.retinalCoverage * 100).toFixed(0)}%`;
+
   if (currentImage) {
-    const axialLength = parseFloat(axialLengthInput.value) || 24;
-    const corneaDiameter = getCorneaDiameter();
-    const corneaKValue = getCorneaKValue();
-    const fov = parseFloat(fovInput.value) || 200;
-    updateTexture(currentImage, { 
-      fov, 
-      axialLength,
-      corneaDiameter,
-      corneaKValue,
-      maculaX: markers.macula.x,
-      maculaY: markers.macula.y,
-      discX: markers.disc.set ? markers.disc.x : null,
-      discY: markers.disc.set ? markers.disc.y : null
-    });
+    updateTexture(currentImage, getTextureOptions());
   }
-  
+
   if (markers.hole.set) {
     updateHoleInfo();
   }
@@ -437,23 +458,9 @@ function processImage() {
   
   requestAnimationFrame(() => {
     try {
-      const axialLength = parseFloat(axialLengthInput.value) || 24;
-      const corneaDiameter = getCorneaDiameter();
-      const corneaKValue = getCorneaKValue();
-      const fov = parseFloat(fovInput.value) || 200;
-      
-      updateTexture(currentImage, { 
-        fov, 
-        axialLength,
-        corneaDiameter,
-        corneaKValue,
-        maculaX: markers.macula.x,
-        maculaY: markers.macula.y,
-        discX: markers.disc.set ? markers.disc.x : null,
-        discY: markers.disc.set ? markers.disc.y : null
-      });
+      updateTexture(currentImage, getTextureOptions());
       updateVisualizationMarkers();
-      
+
     } catch (error) {
       console.error('处理失败:', error);
       showError('图像处理失败: ' + error.message);

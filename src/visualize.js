@@ -9,9 +9,11 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { calculateEyeGeometry, ANATOMY } from './mapper.js';
+import { calculateEyeGeometry, createProjectionModel } from './mapper.js';
 
-const DISC_TO_MACULA_ANGLE = ANATOMY.combinedDiscMaculaAngle;
+// 所有图像距离 ↔ 角度的换算统一经由 mapper.createProjectionModel,
+// 以保证 3D 视图与测量面板使用完全相同的几何模型。
+let currentModel = null;
 
 let scene, camera, renderer, controls;
 let currentTexture = null;
@@ -207,50 +209,41 @@ function animate() {
 
 /**
  * 创建视网膜投影球体几何
- * 使用方位角等距投影，黄斑位于后极
- * 
- * @param {number} radius - 视网膜半径 (mm)
- * @param {number} fov - 视场角 (度)
+ *
+ * 角度换算全部委托给 mapper 的投影模型(含视场角→球心角的结点转换),
+ * 本函数只负责把角度铺成网格。
+ *
+ * @param {Object} model - mapper.createProjectionModel() 的返回值
  * @param {number} segments - 球体分段数
- * @param {number} maculaX - 黄斑在图像中的 x 位置 (0-1)
- * @param {number} maculaY - 黄斑在图像中的 y 位置 (0-1)
  * @returns {THREE.BufferGeometry} 自定义几何体
  */
-function createRetinalSphereGeometry(radius = 12, fov = 200, segments = 128, maculaX = 0.5, maculaY = 0.5, discX = null, discY = null, imageAspect = 1) {
+function createRetinalSphereGeometry(model, segments = 128) {
   const geometry = new THREE.BufferGeometry();
-  
+
   const vertices = [];
   const normals = [];
   const uvs = [];
   const indices = [];
-  
-  let maxTheta;
-  let maxNormalizedRadius;
-  
-  if (discX !== null && discY !== null) {
-    const dx = (discX - maculaX) * imageAspect;
-    const dy = (discY - maculaY);
-    const discToMaculaImageDist = Math.sqrt(dx * dx + dy * dy);
-    maxTheta = DISC_TO_MACULA_ANGLE * (Math.PI / 180) / discToMaculaImageDist;
-    maxNormalizedRadius = 1 / discToMaculaImageDist;
-  } else {
-    maxTheta = (fov / 2) * (Math.PI / 180);
-    maxNormalizedRadius = 1;
-  }
-  
+
+  const radius = model.R;
+  const { maculaX, maculaY, imageAspect } = model;
+
+  // 只绘制标称视场以内的部分
+  const maxNormalizedRadius = model.maxDist;
+
   for (let i = 0; i <= segments; i++) {
     for (let j = 0; j <= segments; j++) {
       const u = i / segments;
       const v = j / segments;
-      
+
       // 宽高比修正：对于宽屏图像，水平方向应该覆盖更大角度
       const dx = (u - maculaX) * imageAspect;
       const dy = (v - maculaY);
-      
+
       const r = Math.sqrt(dx * dx + dy * dy);
-      const theta = r * maxTheta;
+      const theta = model.retinalAngleAt(r);
       const phi = Math.atan2(-dy, dx);
-      
+
       const x = radius * Math.sin(theta) * Math.cos(phi);
       const y = radius * Math.sin(theta) * Math.sin(phi);
       const z = -radius * Math.cos(theta);
@@ -278,10 +271,10 @@ function createRetinalSphereGeometry(radius = 12, fov = 200, segments = 128, mac
       const c = a + segments + 1;
       const d = c + 1;
       
-      const u_a = (i / segments - maculaX) * imageAspect;
-      const v_a = (j / segments - maculaY);
+      const u_a = (i / segments - model.maculaX) * model.imageAspect;
+      const v_a = (j / segments - model.maculaY);
       const r_a = Math.sqrt(u_a * u_a + v_a * v_a);
-      
+
       if (r_a <= maxNormalizedRadius) {
         indices.push(a, b, d);
         indices.push(a, d, c);
@@ -307,37 +300,43 @@ function createRetinalSphereGeometry(radius = 12, fov = 200, segments = 128, mac
  * @param {number} options.maculaY - 黄斑 y 位置 (0-1)
  */
 export function updateTexture(image, options = {}) {
-  const { 
-    fov = 200, 
-    axialLength = 24, 
+  const {
+    fov = 200,
+    axialLength = 24,
     corneaDiameter = null,
     corneaKValue = null,
-    maculaX = 0.5, 
-    maculaY = 0.5, 
-    discX = null, 
-    discY = null 
+    projection,
+    maculaX = 0.5,
+    maculaY = 0.5,
+    discX = null,
+    discY = null
   } = options;
-  
-  currentEyeGeometry = calculateEyeGeometry(axialLength, corneaDiameter, corneaKValue);
-  const retinalRadius = currentEyeGeometry.retinalRadius;
+
   const imageAspect = image.width / image.height;
-  
+
+  currentModel = createProjectionModel({
+    axialLength, fov, corneaDiameter, corneaKValue, projection,
+    maculaX, maculaY, discX, discY, imageAspect
+  });
+  currentEyeGeometry = currentModel.eyeGeometry;
+
   const texture = new THREE.Texture(image);
   texture.needsUpdate = true;
-  currentTexture = { 
-    texture, 
-    image, 
-    fov, 
-    axialLength, 
+  currentTexture = {
+    texture,
+    image,
+    fov,
+    axialLength,
     corneaDiameter,
     corneaKValue,
-    maculaX, 
-    maculaY, 
-    discX, 
-    discY, 
-    imageAspect 
+    projection,
+    maculaX,
+    maculaY,
+    discX,
+    discY,
+    imageAspect
   };
-  
+
   if (sphereMesh) {
     scene.remove(sphereMesh);
     sphereMesh.geometry.dispose();
@@ -346,13 +345,13 @@ export function updateTexture(image, options = {}) {
   
   createReferenceSphere(currentEyeGeometry);
   createCornea(currentEyeGeometry);
-  
-  createSphereMesh(texture, image, retinalRadius, fov, maculaX, maculaY, discX, discY, imageAspect);
+
+  createSphereMesh(texture, currentModel);
 }
 
-function createSphereMesh(texture, image, radius, fov, maculaX, maculaY, discX, discY, imageAspect) {
-  const geometry = createRetinalSphereGeometry(radius, fov, 128, maculaX, maculaY, discX, discY, imageAspect);
-  
+function createSphereMesh(texture, model) {
+  const geometry = createRetinalSphereGeometry(model, 128);
+
   const material = new THREE.MeshStandardMaterial({
     map: texture,
     side: THREE.FrontSide,
@@ -385,7 +384,7 @@ export function setMarkers(markers) {
   currentMarkers = { ...markers };
   
   if (currentTexture && markers.macula) {
-    const { texture, image, fov, axialLength, corneaDiameter, corneaKValue, imageAspect } = currentTexture;
+    const { texture, fov, axialLength, corneaDiameter, corneaKValue, projection, imageAspect } = currentTexture;
     const { x: maculaX, y: maculaY } = markers.macula;
     const discX = markers.disc ? markers.disc.x : null;
     const discY = markers.disc ? markers.disc.y : null;
@@ -412,9 +411,12 @@ export function setMarkers(markers) {
         sphereMesh = null;
       }
       
-      currentEyeGeometry = calculateEyeGeometry(axialLength, corneaDiameter, corneaKValue);
-      const retinalRadius = currentEyeGeometry.retinalRadius;
-      createSphereMesh(texture, image, retinalRadius, fov, maculaX, maculaY, discX, discY, imageAspect);
+      currentModel = createProjectionModel({
+        axialLength, fov, corneaDiameter, corneaKValue, projection,
+        maculaX, maculaY, discX, discY, imageAspect
+      });
+      currentEyeGeometry = currentModel.eyeGeometry;
+      createSphereMesh(texture, currentModel);
     }
   }
   
@@ -422,11 +424,10 @@ export function setMarkers(markers) {
 }
 
 function updateMarkerMeshes() {
-  if (!currentTexture || !currentEyeGeometry) return;
-  
-  const { fov = 200, maculaX = 0.5, maculaY = 0.5, discX, discY, imageAspect = 1 } = currentTexture;
-  const R = currentEyeGeometry.retinalRadius;
-  
+  if (!currentTexture || !currentEyeGeometry || !currentModel) return;
+
+  const R = currentModel.R;
+
   Object.keys(markerMeshes).forEach(type => {
     if (markerMeshes[type]) {
       scene.remove(markerMeshes[type]);
@@ -454,12 +455,7 @@ function updateMarkerMeshes() {
   }
   
   if (currentMarkers.disc) {
-    const discPos = imageToSpherePosition(
-      currentMarkers.disc.x, 
-      currentMarkers.disc.y, 
-      maculaX, maculaY, 
-      R, fov, discX, discY, imageAspect
-    );
+    const discPos = imageToSpherePosition(currentMarkers.disc.x, currentMarkers.disc.y, currentModel);
     markerMeshes.disc = createMarkerSphere(
       discPos.x, discPos.y, discPos.z,
       0x4ecdc4,
@@ -468,41 +464,32 @@ function updateMarkerMeshes() {
   }
   
   if (currentMarkers.hole) {
-    const holePos = imageToSpherePosition(
-      currentMarkers.hole.x, 
-      currentMarkers.hole.y, 
-      maculaX, maculaY, 
-      R, fov, discX, discY, imageAspect
-    );
+    const holePos = imageToSpherePosition(currentMarkers.hole.x, currentMarkers.hole.y, currentModel);
     markerMeshes.hole = createMarkerSphere(
       holePos.x, holePos.y, holePos.z,
       0xffe66d,
       '裂孔'
     );
     
-    limbusArcLine = createLimbusArcLine(holePos, R, currentEyeGeometry.corneaDiameter);
+    limbusArcLine = createLimbusArcLine(holePos, R);
   }
 }
 
-function imageToSpherePosition(x, y, maculaX, maculaY, R, fov, discX = null, discY = null, imageAspect = 1) {
-  const dx = (x - maculaX) * imageAspect;
-  const dy = (y - maculaY);
-  
+/**
+ * 图像归一化坐标 → 场景笛卡尔坐标
+ * 注意本模块黄斑位于 z = -R(渲染朝向需要),与 mapper 的 z = +R 差一个 z 翻转;
+ * 角度量 (θ, φ) 两者完全一致。
+ */
+function imageToSpherePosition(x, y, model) {
+  const dx = (x - model.maculaX) * model.imageAspect;
+  const dy = (y - model.maculaY);
+
   const r = Math.sqrt(dx * dx + dy * dy);
-  
-  let maxTheta;
-  if (discX !== null && discY !== null) {
-    const ddx = (discX - maculaX) * imageAspect;
-    const ddy = (discY - maculaY);
-    const discToMaculaImageDist = Math.sqrt(ddx * ddx + ddy * ddy);
-    maxTheta = DISC_TO_MACULA_ANGLE * (Math.PI / 180) / discToMaculaImageDist;
-  } else {
-    maxTheta = (fov / 2) * (Math.PI / 180);
-  }
-  
-  const theta = r * maxTheta;
+
+  const theta = model.retinalAngleAt(r);
   const phi = Math.atan2(-dy, dx);
-  
+  const R = model.R;
+
   return {
     x: R * Math.sin(theta) * Math.cos(phi),
     y: R * Math.sin(theta) * Math.sin(phi),
@@ -540,20 +527,18 @@ function createMarkerSphere(x, y, z, color, label) {
   return group;
 }
 
-function createLimbusArcLine(holePos, retinalRadius, corneaDiameter) {
-  const halfWtw = corneaDiameter / 2;
-  const zAtLimbus = Math.sqrt(retinalRadius * retinalRadius - halfWtw * halfWtw);
-  
+function createLimbusArcLine(holePos, retinalRadius) {
   const holeAngle = Math.atan2(holePos.y, holePos.x);
-  
+
   const points = [];
   const segments = 50;
-  
-  const startTheta = Math.acos(-holePos.z / retinalRadius);
-  const endTheta = Math.acos(-zAtLimbus / retinalRadius);
-  
+
+  const startTheta = Math.acos(Math.max(-1, Math.min(1, -holePos.z / retinalRadius)));
+  // 角膜缘所在等纬圆的球心角,由 mapper 的眼球几何单一来源提供
+  const endTheta = currentEyeGeometry.limbusPolarAngle;
+
   const phi = holeAngle;
-  
+
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
     const theta = startTheta + t * (endTheta - startTheta);
