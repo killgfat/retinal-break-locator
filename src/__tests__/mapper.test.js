@@ -447,6 +447,28 @@ describe('calculateBreakToMacula', () => {
     const st = calculateBreakToMacula(0.9, 0.5, macula, undefined, { projection: 'stereographic' });
     expect(st.distanceMm).not.toBeCloseTo(eq.distanceMm, 2);
   });
+
+  it('disc mode reports a population-range uncertainty bracketing the central value', () => {
+    const macula = { x: 0.5, y: 0.5 };
+    const disc = { x: 0.6, y: 0.5 };
+    const r = calculateBreakToMacula(0.7, 0.5, macula, disc);
+
+    expect(r.calibration.method).toBe('disc');
+    expect(r.distanceMmLow).toBeLessThan(r.distanceMm);
+    expect(r.distanceMmHigh).toBeGreaterThan(r.distanceMm);
+    expect(r.distanceMmUncertainty).toBeCloseTo((r.distanceMmHigh - r.distanceMmLow) / 2, 9);
+    // ±10% 锚点变异 ⇒ 距离变异同量级 (~10%, 允许结点转换带来的轻微非线性)
+    const rel = r.distanceMmUncertainty / r.distanceMm;
+    expect(rel).toBeGreaterThan(0.08);
+    expect(rel).toBeLessThan(0.13);
+  });
+
+  it('fov mode flags uncertainty as unbounded with zero half-width', () => {
+    const r = calculateBreakToMacula(0.6, 0.5, { x: 0.5, y: 0.5 });
+    expect(r.calibration.method).toBe('fov');
+    expect(r.uncertaintySource).toMatch(/unbounded/);
+    expect(r.distanceMmUncertainty).toBe(0);
+  });
 });
 
 describe('calculateLimbusDistance', () => {

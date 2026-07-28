@@ -106,9 +106,8 @@ const STANDARD_EYE = {
 
 // 解剖学数据
 const ANATOMY = {
-  discToMaculaAngle: 17,      // 视盘位于黄斑鼻侧约 17°
-  discToMaculaDistance: 4.5,  // 视盘到黄斑距离 (mm)
-  limbusToMaculaArc: 30.5,    // 角膜缘到黄斑弧长 (mm)
+  discToMaculaAngle: 17,      // 视盘位于黄斑鼻侧约 17° (视角)
+  discToMaculaDistance: 4.5,  // 视盘到黄斑距离 (mm), 唯一标定锚点
 };
 ```
 

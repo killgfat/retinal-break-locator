@@ -52,6 +52,7 @@
 export const ANATOMY = {
   // --- 标定锚点(唯一用于换算的量,单位 mm)---
   discToMaculaDistance: 4.5,  // 视盘到黄斑的视网膜面距离 (mm), 范围 4.0-5.0
+  discToMaculaDistanceRange: [4.0, 5.0], // 群体变异范围, 用于不确定性传播
 
   // --- 以下角度均为「视角 (field angle)」,仅供参考与方位推算,不可当球心角用 ---
   discToMaculaAngle: 17,         // 视盘位于黄斑鼻侧约 17° (视角)
@@ -211,7 +212,6 @@ export function calculateEyeGeometry(axialLength = 24, corneaDiameter = null, co
     nodalToRetina: scleralRadius + nodalOffset,
     limbusPolarAngle,            // 弧度, 自后极量起
     limbusToPoleArc,
-    limbusToMaculaArc: limbusToPoleArc, // 兼容旧名;严格说是「到光轴极点」
     corneaDiameter: wtw,
     corneaRadius: kValue,
     corneaThickness: ANATOMY.corneaThickness,
@@ -261,7 +261,8 @@ export function createProjectionModel(options = {}) {
     maculaY = 0.5,
     discX = null,
     discY = null,
-    imageAspect = 1
+    imageAspect = 1,
+    discToMaculaDistance = ANATOMY.discToMaculaDistance
   } = options;
 
   const eyeGeometry = calculateEyeGeometry(axialLength, corneaDiameter, corneaKValue);
@@ -285,7 +286,7 @@ export function createProjectionModel(options = {}) {
 
   if (hasDisc && discDist > 1e-6) {
     // 物理锚点: 盘-斑 4.5mm → 球心角 → 视角
-    const discRetinalAngle = ANATOMY.discToMaculaDistance / R;
+    const discRetinalAngle = discToMaculaDistance / R;
     const discFieldAngle = retinalToFieldAngle(discRetinalAngle, R, d);
     k = law.radius(discFieldAngle) / discDist;
     calibration = {
@@ -720,8 +721,39 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
 
   const distanceMm = model.R * theta;
 
+  // --- 不确定性传播 ---
+  // 盘-斑锚点的群体变异 (4.0-5.0mm) 是 disc 模式下距离换算的主要误差源。
+  // 标定尺度 k 与该锚点近似线性,故在范围两端重算即可包出真实距离的区间。
+  // FOV 回退模式没有任何物理锚点,误差不可量化,只能标记为 unbounded。
+  let distanceMmLow = distanceMm;
+  let distanceMmHigh = distanceMm;
+  let uncertaintySource = 'none';
+
+  if (model.calibration.method === 'disc') {
+    const [lo, hi] = ANATOMY.discToMaculaDistanceRange;
+    const evalAt = (dmm) => {
+      const m = createProjectionModel({
+        axialLength, fov, corneaDiameter, corneaKValue, projection,
+        maculaX, maculaY, discX: disc.x, discY: disc.y, imageAspect,
+        discToMaculaDistance: dmm
+      });
+      return m.R * m.retinalAngleAt(dist);
+    };
+    distanceMmLow = evalAt(lo);
+    distanceMmHigh = evalAt(hi);
+    uncertaintySource = 'disc-macula population range';
+  } else {
+    uncertaintySource = 'unbounded (no disc anchor)';
+  }
+
+  const distanceMmUncertainty = (distanceMmHigh - distanceMmLow) / 2;
+
   return {
     distanceMm,
+    distanceMmLow,
+    distanceMmHigh,
+    distanceMmUncertainty,
+    uncertaintySource,
     angleDeg,                          // 球心角 (度) —— 传给 calculateLimbusDistance 的就是它
     theta,
     fieldAngle,

@@ -314,7 +314,12 @@ function updateHoleInfo() {
   
   const calibNote = breakResult.calibration.method === 'disc' ? '盘-斑标定' : '⚠ 未标定(用标称FOV)';
 
-  document.getElementById('hole-distance').textContent = `${breakResult.distanceMm.toFixed(2)} mm (${breakResult.angleDeg.toFixed(1)}°)`;
+  const distText = breakResult.distanceMm.toFixed(2);
+  const distUncertainty = breakResult.calibration.method === 'disc'
+    ? ` ±${breakResult.distanceMmUncertainty.toFixed(2)}`
+    : ' ⚠无锚点';
+  document.getElementById('hole-distance').textContent =
+    `${distText}${distUncertainty} mm (${breakResult.angleDeg.toFixed(1)}°)`;
   document.getElementById('hole-direction').textContent = `黄斑${direction}`;
   document.getElementById('hole-sphere').textContent =
     `θ=${breakResult.angleDeg.toFixed(1)}° (视角${breakResult.fieldAngleDeg.toFixed(1)}°), φ=${phiDeg.toFixed(1)}° · ${calibNote}`;
