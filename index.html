@@ -526,7 +526,7 @@
           </div>
           
           <div class="control-group">
-            <label>视场角 (°)</label>
+            <label>视场角 <span style="color: #666; font-size: 0.75rem;">球心角口径</span> (°)</label>
             <input type="number" id="fov" value="200" step="1" min="30" max="200">
           </div>
 
@@ -540,11 +540,11 @@
           </div>
 
           <div class="control-group">
-            <label>投影律 <span style="color: #666; font-size: 0.75rem;">未标定时为估计值</span></label>
+            <label>投影律 <span style="color: #666; font-size: 0.75rem;">默认等距;其余仅供敏感性分析</span></label>
             <select id="projection-select">
-              <option value="equidistant">等距 ρ∝θ (默认)</option>
-              <option value="stereographic">立体投影 ρ∝tan(θ/2)</option>
-              <option value="equisolid">等立体角 ρ∝sin(θ/2)</option>
+              <option value="equidistant">等距 ρ∝θ_r (默认)</option>
+              <option value="stereographic">立体投影 ρ∝tan(θ_r/2)</option>
+              <option value="equisolid">等立体角 ρ∝sin(θ_r/2)</option>
             </select>
           </div>
         </div>

@@ -125,18 +125,36 @@ describe('createProjectionModel', () => {
     expect(model.calibration.discFieldAngleDeg).toBeLessThan(deg);
   });
 
-  it('falls back to nominal FOV without a disc, with field edge at dist=0.5', () => {
+  it('falls back to nominal FOV without a disc, with field edge at dist=0.5 (θ_r = fov/2)', () => {
     const model = createProjectionModel({ fov: 200 });
     expect(model.calibration.method).toBe('fov');
     expect(model.maxDist).toBeCloseTo(0.5, 9);
-    expect(model.fieldAngleAt(0.5) * RAD).toBeCloseTo(100, 9);
+    // P1: fov 按球心角解释 —— 视场边缘的球心角恰为 fov/2
+    expect(model.retinalAngleAt(0.5) * RAD).toBeCloseTo(100, 9);
+    expect(model.maxRetinalAngle * RAD).toBeCloseTo(100, 9);
+    // 结点视角仅为回算值, 应明显小于球心角
+    expect(model.fieldAngleAt(0.5) * RAD).toBeLessThan(100);
   });
 
-  it('a 200° field covers ~78% of the retina (matches Optos ~82% claim far better than 59%)', () => {
+  it('a 200° field covers ~80.7% of the retina (matches Optos ~82% claim)', () => {
     const model = createProjectionModel({ fov: 200 });
-    expect(model.maxRetinalAngle * RAD).toBeGreaterThan(115);
-    expect(model.retinalCoverage).toBeGreaterThan(0.7);
-    expect(model.retinalCoverage).toBeLessThan(0.85);
+    // P1: 球心角口径 —— 半场 100°;视网膜以锯齿缘 (≈117° 球心角) 为界
+    expect(model.maxRetinalAngle * RAD).toBeCloseTo(100, 9);
+    expect(model.retinalCoverage).toBeGreaterThan(0.78);
+    expect(model.retinalCoverage).toBeLessThan(0.83);
+  });
+
+  it('anchors the disc-macula geodesic at 4.5mm even with an eccentric macula', () => {
+    const model = createProjectionModel({
+      maculaX: 0.45, maculaY: 0.45, discX: 0.6, discY: 0.55
+    });
+    expect(model.calibration.method).toBe('disc');
+
+    // P0: 尺度求根使盘-斑测地距离 (而非黄斑系径向距离) = 4.5mm
+    const uM = model.unproject(0.45, 0.45).u;
+    const uD = model.unproject(0.6, 0.55).u;
+    const cosD = uM.x * uD.x + uM.y * uD.y + uM.z * uD.z;
+    expect(model.R * Math.acos(cosD)).toBeCloseTo(ANATOMY.discToMaculaDistance, 9);
   });
 
   it('retinalAngleAt is monotonic increasing', () => {
@@ -173,21 +191,38 @@ describe('calculateRetinalParameters', () => {
     expect(params.degPerPixel).toBe(0.1);
   });
 
-  it('reports a retinal arc based on the central angle, exceeding R·fov', () => {
+  it('reports a retinal arc of exactly R·fov (fov is a central-angle quantity)', () => {
     const params = calculateRetinalParameters(24, 200, 2000);
     const R = params.retinalRadius;
-    // 旧模型: R * 200° ; 新模型经结点转换后更大
-    expect(params.retinalArc).toBeGreaterThan(R * 200 * DEG);
+    expect(params.retinalArc).toBeCloseTo(R * 200 * DEG, 9);
   });
 
-  it('a central pixel covers more retina than the whole-field average (periphery is magnified)', () => {
-    // Croft 2014: 未校正图像中后极像素代表的面积比周边大 ~79%
+  it('central scale equals the whole-field average under the default equidistant law', () => {
+    // ρ ∝ θ_r 全场线性 ⇒ 中心像素与平均像素代表的视网膜尺寸相同。
+    // 该线性律正是 Croft 2014 实测 1.79× 中心/周边面积比的自洽解。
     const params = calculateRetinalParameters(24, 200, 2000);
+    expect(params.mmPerPixelCenter).toBeCloseTo(params.mmPerPixel, 6);
+  });
+
+  it('stereographic (sensitivity analysis) magnifies the centre relative to the average', () => {
+    const params = calculateRetinalParameters(24, 200, 2000, { projection: 'stereographic' });
     expect(params.mmPerPixelCenter).toBeGreaterThan(params.mmPerPixel);
   });
 
-  it('radial scale falls monotonically from centre to field edge', () => {
+  it('radial scale is constant under the default equidistant law', () => {
     const model = createProjectionModel({ fov: 200 });
+    const h = 1e-6;
+    const scaleAt = (dist) =>
+      model.R * (model.retinalAngleAt(dist + h) - model.retinalAngleAt(dist - h)) / (2 * h);
+
+    // 常数应为 R·k (θ_r = k·dist); 中央差分有 ~1e-9 量级浮点噪声, 放宽精度
+    for (const dist of [0.05, 0.15, 0.25, 0.35, 0.45]) {
+      expect(scaleAt(dist)).toBeCloseTo(model.R * model.scale, 6);
+    }
+  });
+
+  it('radial scale falls monotonically under stereographic (sensitivity analysis)', () => {
+    const model = createProjectionModel({ fov: 200, projection: 'stereographic' });
     const h = 1e-6;
     const scaleAt = (dist) =>
       model.R * (model.retinalAngleAt(dist + h) - model.retinalAngleAt(dist - h)) / (2 * h);
@@ -232,6 +267,24 @@ describe('imageToSphere', () => {
   it('phi is +90° for a point directly above the macula', () => {
     const up = imageToSphere(0.5, 0.4, 24, 200, { maculaX: 0.5, maculaY: 0.5 });
     expect(up.phi * RAD).toBeCloseTo(90, 6);
+  });
+
+  it('with an eccentric macula, the image centre is no longer at theta=0 (P0)', () => {
+    const model = createProjectionModel({ maculaX: 0.6, maculaY: 0.5 });
+    const centre = imageToSphere(0.5, 0.5, 24, 200, { model });
+    // 图像中心 = 投影极点; 其距黄斑的角 = 黄斑自身的极点系角
+    expect(centre.theta).toBeGreaterThan(0);
+    expect(centre.theta).toBeCloseTo(model.maculaTheta, 12);
+    expect(centre.arcFromMaculaMm).toBeCloseTo(model.R * model.maculaTheta, 9);
+  });
+
+  it('with an eccentric macula, phi is still measured in the macula tangent plane (P0)', () => {
+    // 黄斑在极点正上方: 黄斑正上方的点 (沿子午线远离极点) 方位角仍为 +90°,
+    // 黄斑与极点之间的点 (朝极点方向) 为 -90°。
+    const above = imageToSphere(0.5, 0.35, 24, 200, { maculaX: 0.5, maculaY: 0.45 });
+    const below = imageToSphere(0.5, 0.49, 24, 200, { maculaX: 0.5, maculaY: 0.45 });
+    expect(above.phi * RAD).toBeCloseTo(90, 6);
+    expect(below.phi * RAD).toBeCloseTo(-90, 6);
   });
 
   it('reuses a supplied model', () => {
@@ -405,17 +458,53 @@ describe('calculateBreakToMacula', () => {
     expect(result.calibration.method).toBe('disc');
   });
 
-  it('field angle is linear in image distance, but central angle is sub-linear', () => {
+  it('returns 4.5mm for a break on the disc with an eccentric macula (P0)', () => {
+    // 旧模型把盘-斑当作黄斑系径向距离, 黄斑偏心时标定即错;
+    // 新模型对测地距离求根, 任意偏心下都应精确锚定。
+    const macula = { x: 0.45, y: 0.45 };
+    const disc = { x: 0.6, y: 0.55 };
+    const result = calculateBreakToMacula(disc.x, disc.y, macula, disc);
+    expect(result.distanceMm).toBeCloseTo(ANATOMY.discToMaculaDistance, 9);
+    expect(result.calibration.method).toBe('disc');
+  });
+
+  it('central angle is exactly linear in image distance; field angle is super-linear', () => {
     const macula = { x: 0.5, y: 0.5 };
     const disc = { x: 0.6, y: 0.5 };
     const near = calculateBreakToMacula(0.6, 0.5, macula, disc);
     const far = calculateBreakToMacula(0.7, 0.5, macula, disc);
 
-    // 等距律 ⇒ 视角严格线性
-    expect(far.fieldAngleDeg).toBeCloseTo(near.fieldAngleDeg * 2, 6);
-    // 球心角 sub-linear: θr/θv 随角度增大而下降
-    expect(far.angleDeg).toBeLessThan(near.angleDeg * 2);
-    expect(far.angleDeg).toBeGreaterThan(near.angleDeg);
+    // 等距律 (ρ ∝ θ_r) ⇒ 球心角随图像距离严格线性 (0.2 = 2 × 0.1)
+    expect(far.angleDeg).toBeCloseTo(near.angleDeg * 2, 6);
+    // 结点视角为回算值, 对球心角超线性 (θv/θr 随角度增大趋近 1)
+    expect(far.fieldAngleDeg).toBeGreaterThan(near.fieldAngleDeg * 2);
+    // 视角恒小于对应球心角
+    expect(far.fieldAngleDeg).toBeLessThan(far.angleDeg);
+    expect(near.fieldAngleDeg).toBeLessThan(near.angleDeg);
+  });
+
+  it('an eccentric macula breaks the false symmetry between its two sides (P0 regression)', () => {
+    // 旧模型以黄斑为极点, 黄斑两侧等图像距离的两点被强制给出相同距离;
+    // 新模型绕图像中心解投影, 非线性律下两侧测地距离按真实几何区分。
+    // (stereographic 为凹函数: 越过极点一侧的测地距离严格大于远侧)
+    const macula = { x: 0.55, y: 0.5 };
+    const disc = { x: 0.65, y: 0.5 };
+    const farSide = calculateBreakToMacula(0.65, 0.5, macula, disc, { projection: 'stereographic' });
+    const acrossPole = calculateBreakToMacula(0.45, 0.5, macula, disc, { projection: 'stereographic' });
+
+    expect(farSide.distanceMm).toBeCloseTo(ANATOMY.discToMaculaDistance, 9);
+    expect(acrossPole.distanceMm).not.toBeCloseTo(farSide.distanceMm, 6);
+    expect(acrossPole.distanceMm).toBeGreaterThan(farSide.distanceMm);
+  });
+
+  it('collinear configurations remain self-consistent under the linear default law', () => {
+    // 等距律线性 ⇒ 共线配置仍满足可加性: 越过极点、与黄斑关于极点对称的点,
+    // 其测地距离 = 2 × 黄斑自身的极点系角 × R。
+    const macula = { x: 0.55, y: 0.5 };
+    const disc = { x: 0.65, y: 0.5 };
+    const acrossPole = calculateBreakToMacula(0.45, 0.5, macula, disc);
+    const model = acrossPole.model;
+    expect(acrossPole.distanceMm).toBeCloseTo(2 * model.R * model.maculaTheta, 9);
   });
 
   it('the disc anchor yields a central angle ~20% larger than the 18.7° field angle', () => {
@@ -524,6 +613,21 @@ describe('calculateLimbusDistance', () => {
     const spread = nasal.limbusToBreakMm - temporal.limbusToBreakMm;
     expect(spread).toBeGreaterThan(1);
     expect(spread).toBeLessThan(3);
+  });
+
+  it('matches the spherical law of cosines off the meridian (vector form is equivalent)', () => {
+    // P0 向量化后, 离子午线方向必须与旧球面余弦定理公式一致
+    for (const phiDeg of [30, 75, 130, 200, 310]) {
+      const r = calculateLimbusDistance(60, 24, null, null, { phiDeg, eyeSide: 'right' });
+      const alpha = ANATOMY.angleAlpha * DEG;
+      const theta = 60 * DEG;
+      const phi = phiDeg * DEG;
+      const expected = Math.acos(
+        Math.cos(alpha) * Math.cos(theta) +
+          Math.sin(alpha) * Math.sin(theta) * Math.cos(phi)
+      ) * RAD;
+      expect(r.thetaFromOpticalAxisDeg).toBeCloseTo(expected, 9);
+    }
   });
 
   it('mirrors the alpha correction between eyes', () => {

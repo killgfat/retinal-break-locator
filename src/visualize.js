@@ -3,17 +3,20 @@
  * 
  * 关键概念:
  * - 使用方位角等距投影 (Azimuthal Equidistant Projection)
- * - 黄斑位于球体后极 (z = R)
- * - 图像以黄斑为中心，而非相机光轴
+ * - **投影极点 = 图像中心 (扫描光轴)**;黄斑只是测量原点,可以偏心
+ * - 网格绕图像中心生成后,整体转到「黄斑正对相机」的朝向 (黄斑位于 z = -R)
  */
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { calculateEyeGeometry, createProjectionModel } from './mapper.js';
+import { ANATOMY, calculateEyeGeometry, createProjectionModel } from './mapper.js';
+
+const DEG = Math.PI / 180;
 
 // 所有图像距离 ↔ 角度的换算统一经由 mapper.createProjectionModel,
 // 以保证 3D 视图与测量面板使用完全相同的几何模型。
 let currentModel = null;
+let currentEyeSide = 'right';
 
 let scene, camera, renderer, controls;
 let currentTexture = null;
@@ -210,8 +213,9 @@ function animate() {
 /**
  * 创建视网膜投影球体几何
  *
- * 角度换算全部委托给 mapper 的投影模型(含视场角→球心角的结点转换),
- * 本函数只负责把角度铺成网格。
+ * 极点 = 图像中心 (扫描光轴);角度换算全部委托给 mapper 的投影模型,
+ * 再经黄斑测量框架定向, 使黄斑恒位于本模块的后极 (0, 0, -R)。
+ * 本函数只负责把 (角度, 方位) 铺成网格。
  *
  * @param {Object} model - mapper.createProjectionModel() 的返回值
  * @param {number} segments - 球体分段数
@@ -226,7 +230,6 @@ function createRetinalSphereGeometry(model, segments = 128) {
   const indices = [];
 
   const radius = model.R;
-  const { maculaX, maculaY, imageAspect } = model;
 
   // 只绘制标称视场以内的部分
   const maxNormalizedRadius = model.maxDist;
@@ -236,30 +239,20 @@ function createRetinalSphereGeometry(model, segments = 128) {
       const u = i / segments;
       const v = j / segments;
 
-      // 宽高比修正：对于宽屏图像，水平方向应该覆盖更大角度
-      const dx = (u - maculaX) * imageAspect;
-      const dy = (v - maculaY);
+      // 绕图像中心解投影 → 黄斑基准笛卡尔 (黄斑 z = +R)
+      const p = model.unproject(u, v);
+      const m = model.toMaculaFrame(p.u);
 
-      const r = Math.sqrt(dx * dx + dy * dy);
-      const theta = model.retinalAngleAt(r);
-      const phi = Math.atan2(-dy, dx);
+      // 本模块渲染约定黄斑位于 z = -R (z 翻转)
+      const x = m.x;
+      const y = m.y;
+      const z = -m.z;
 
-      const x = radius * Math.sin(theta) * Math.cos(phi);
-      const y = radius * Math.sin(theta) * Math.sin(phi);
-      const z = -radius * Math.cos(theta);
-      
       vertices.push(x, y, z);
-      
-      if (theta > 0.001) {
-        normals.push(
-          -Math.sin(theta) * Math.cos(phi),
-          -Math.sin(theta) * Math.sin(phi),
-          Math.cos(theta)
-        );
-      } else {
-        normals.push(0, 0, 1);
-      }
-      
+
+      // 内表面法线 (指向球心)
+      normals.push(-x / radius, -y / radius, -z / radius);
+
       uvs.push(u, 1 - v);
     }
   }
@@ -270,9 +263,10 @@ function createRetinalSphereGeometry(model, segments = 128) {
       const b = a + 1;
       const c = a + segments + 1;
       const d = c + 1;
-      
-      const u_a = (i / segments - model.maculaX) * model.imageAspect;
-      const v_a = (j / segments - model.maculaY);
+
+      // 剔除标称视场外的单元 (距离自图像中心量起)
+      const u_a = (i / segments - 0.5) * model.imageAspect;
+      const v_a = (j / segments - 0.5);
       const r_a = Math.sqrt(u_a * u_a + v_a * v_a);
 
       if (r_a <= maxNormalizedRadius) {
@@ -377,8 +371,11 @@ export function getScene() {
  * @param {Object|null} markers.macula - 黄斑位置 {x, y} 归一化坐标
  * @param {Object|null} markers.disc - 视盘位置 {x, y} 归一化坐标
  * @param {Object|null} markers.hole - 视网膜裂孔位置 {x, y} 归一化坐标
+ * @param {Object} options - {eyeSide} 用于黄线的 angle alpha 修正
  */
-export function setMarkers(markers) {
+export function setMarkers(markers, options = {}) {
+  if (options.eyeSide) currentEyeSide = options.eyeSide;
+
   const previousMacula = currentMarkers.macula;
   const previousDisc = currentMarkers.disc;
   currentMarkers = { ...markers };
@@ -447,6 +444,7 @@ function updateMarkerMeshes() {
   }
   
   if (currentMarkers.macula) {
+    // 黄斑基准系的正极 ⇒ 定向后恒在 (0, 0, -R)
     markerMeshes.macula = createMarkerSphere(
       0, 0, -R,
       0xff6b6b,
@@ -471,29 +469,23 @@ function updateMarkerMeshes() {
       '裂孔'
     );
     
-    limbusArcLine = createLimbusArcLine(holePos, R);
+    limbusArcLine = createLimbusArcLine(currentModel, currentEyeSide);
   }
 }
 
 /**
  * 图像归一化坐标 → 场景笛卡尔坐标
- * 注意本模块黄斑位于 z = -R(渲染朝向需要),与 mapper 的 z = +R 差一个 z 翻转;
- * 角度量 (θ, φ) 两者完全一致。
+ * 经黄斑测量框架定向 (黄斑正对相机), 本模块黄斑位于 z = -R;
+ * 与 mapper 的黄斑基准笛卡尔 (z = +R) 差一个 z 翻转。
  */
 function imageToSpherePosition(x, y, model) {
-  const dx = (x - model.maculaX) * model.imageAspect;
-  const dy = (y - model.maculaY);
-
-  const r = Math.sqrt(dx * dx + dy * dy);
-
-  const theta = model.retinalAngleAt(r);
-  const phi = Math.atan2(-dy, dx);
-  const R = model.R;
+  const p = model.unproject(x, y);
+  const m = model.toMaculaFrame(p.u);
 
   return {
-    x: R * Math.sin(theta) * Math.cos(phi),
-    y: R * Math.sin(theta) * Math.sin(phi),
-    z: -R * Math.cos(theta)
+    x: m.x,
+    y: m.y,
+    z: -m.z
   };
 }
 
@@ -527,38 +519,67 @@ function createMarkerSphere(x, y, z, color, label) {
   return group;
 }
 
-function createLimbusArcLine(holePos, retinalRadius) {
-  const holeAngle = Math.atan2(holePos.y, holePos.x);
+function createLimbusArcLine(model, eyeSide) {
+  if (!currentMarkers.hole) return null;
 
-  const points = [];
-  const segments = 50;
+  // 裂孔向量 (黄斑基准系: 黄斑 = +z)
+  const p = model.unproject(currentMarkers.hole.x, currentMarkers.hole.y);
+  const m = model.toMaculaFrame(p.u);
+  const uH = { x: m.x / model.R, y: m.y / model.R, z: m.z / model.R };
 
-  const startTheta = Math.acos(Math.max(-1, Math.min(1, -holePos.z / retinalRadius)));
+  // 光轴极点 = 黄斑向鼻侧转 angle alpha; 角膜缘是绕光轴的等纬圆
+  const alpha = ANATOMY.angleAlpha * DEG;
+  const phiNasal = eyeSide === 'right' ? 0 : Math.PI;
+  const uAxis = {
+    x: Math.sin(alpha) * Math.cos(phiNasal),
+    y: Math.sin(alpha) * Math.sin(phiNasal),
+    z: Math.cos(alpha)
+  };
+
+  const cosStart = uH.x * uAxis.x + uH.y * uAxis.y + uH.z * uAxis.z;
+  const startTheta = Math.acos(Math.max(-1, Math.min(1, cosStart)));
   // 角膜缘所在等纬圆的球心角,由 mapper 的眼球几何单一来源提供
   const endTheta = currentEyeGeometry.limbusPolarAngle;
 
-  const phi = holeAngle;
+  if (!(endTheta > startTheta)) return null;
+
+  // 大圆方向: 裂孔在光轴极点切平面内的分量
+  let e1 = {
+    x: uH.x - cosStart * uAxis.x,
+    y: uH.y - cosStart * uAxis.y,
+    z: uH.z - cosStart * uAxis.z
+  };
+  const e1Len = Math.sqrt(e1.x * e1.x + e1.y * e1.y + e1.z * e1.z);
+  if (e1Len < 1e-9) return null; // 裂孔恰在光轴极点上, 方向不定
+  e1 = { x: e1.x / e1Len, y: e1.y / e1Len, z: e1.z / e1Len };
+
+  const retinalRadius = model.R;
+  const points = [];
+  const segments = 50;
 
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
     const theta = startTheta + t * (endTheta - startTheta);
-    
-    const x = retinalRadius * Math.sin(theta) * Math.cos(phi);
-    const y = retinalRadius * Math.sin(theta) * Math.sin(phi);
-    const z = -retinalRadius * Math.cos(theta);
-    
-    points.push(new THREE.Vector3(x, y, z));
+    const s = Math.sin(theta);
+    const c = Math.cos(theta);
+
+    // 黄斑基准系 → 本模块 z 翻转
+    points.push(new THREE.Vector3(
+      retinalRadius * (s * e1.x + c * uAxis.x),
+      retinalRadius * (s * e1.y + c * uAxis.y),
+      -retinalRadius * (s * e1.z + c * uAxis.z)
+    ));
   }
-  
+
   const geometry = new THREE.BufferGeometry().setFromPoints(points);
   const material = new THREE.LineBasicMaterial({
     color: 0xffe66d,
     linewidth: 1
   });
-  
+
   const line = new THREE.Line(geometry, material);
   scene.add(line);
-  
+
   return line;
 }
 

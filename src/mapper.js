@@ -9,20 +9,20 @@
  * 三种角度必须严格区分:
  *
  *   θ_v  视场角 / 视角 (field angle)
- *        在眼球结点(≈扫描枢轴)处张开的角。SLO 的"200° FOV"、
- *        "视盘位于黄斑鼻侧 17°" 这类文献数字都是这一种。
+ *        在眼球结点(≈扫描枢轴)处张开的角。文献里的"视盘位于黄斑鼻侧 17°"
+ *        这类数字都是这一种。本模块中它**只**出现在文献换算(fieldToRetinalAngle)
+ *        与展示回算,不进入图像投影链。
  *
  *   θ_r  视网膜球心角 (retinal central angle)
  *        在眼球球心处张开的角。弧长 = R·θ_r,所以只有这个角能换算成 mm。
+ *        SLO 的"200° FOV"(Optos / ISWIG, Choudhry 2019)按此口径解释:
+ *        标称视场边缘 (dist = 0.5) 处 θ_r = fov/2。
  *
- *   ρ    图像上的归一化半径。ρ 与 θ_v 的关系由设备投影律决定(见 PROJECTION_LAWS)。
+ *   ρ    图像上的归一化半径。ρ 与 θ_r 的关系由设备投影律决定(见 PROJECTION_LAWS)。
  *
- * 二者的关系(结点位于球心前方 d):
+ * 结点换算(仅用于把文献视角换算成球心角):
  *
  *        tan θ_v = R·sin θ_r / (d + R·cos θ_r)
- *
- * 可化简为闭式解(推导见 fieldToRetinalAngle):
- *
  *        θ_r = θ_v + arcsin(d·sin θ_v / R)
  *        θ_v = atan2(R·sin θ_r,  d + R·cos θ_r)
  *
@@ -30,22 +30,37 @@
  * "1mm 视网膜 ≈ 3.45° 视角",而球心角是 4.77°。
  *
  * ============================================================================
+ * 两个「中心」必须分开 (P0 修正)
+ * ============================================================================
+ *
+ *   投影极点 = 图像中心 (0.5, 0.5) = 扫描光轴打到视网膜的点。
+ *        SLO 的投影绕扫描轴轴对称,投影律、角度换算都必须绕它进行。
+ *        图像中心**不一定是黄斑** —— 固视偏差 / eye-steered 周边像时二者分离。
+ *
+ *   解剖原点 = 黄斑(中心凹) = 视轴落点。
+ *        距离、子午线/钟点、角膜缘距离都以它为基准,全部为球面测地量。
+ *
+ * 流程: 绕设备极点解投影 → 球面 3D 单位向量 → 在黄斑为极的坐标系里测量
+ * (后者全是点积,见 createProjectionModel 的 toMaculaFrame,不必真的换坐标)。
+ *
+ * ============================================================================
  * 标定锚点
  * ============================================================================
  *
- * 标定使用盘-斑的**物理距离** 4.5mm(→ θ_r = 4.5/R),而不是角度。
+ * 标定使用盘-斑的**物理距离** 4.5mm: 求尺度 k 使盘-斑**测地距离**
+ * R·acos(uM·uD) = 4.5mm(一维求根,不再有闭式解)。
  * 文献里的 17°/7.76°/18.7° 都是视角,直接当球心角用会带来约 20% 的系统偏差。
  *
  * ============================================================================
  * 坐标约定
  * ============================================================================
  *
- * - dist: 图像归一化距离,以黄斑为原点。标称视场边缘 dist = 0.5。
- *         (历史版本中 mapper 用 dist×2、visualize 用 dist,导致两者差 2 倍;
- *          现统一为 dist,并由 createProjectionModel 单一来源提供换算。)
+ * - dist: 图像归一化距离,以**图像中心(投影极点)**为原点。
+ *         标称视场边缘 dist = 0.5。
  * - phi:  方位角,从图像右方起逆时针为正,图像上方 = +90°。
- * - 本模块笛卡尔约定:黄斑位于 z = +R。visualize.js 使用 z = -R(渲染朝向需要),
- *   两者仅差一个 z 轴翻转,角度量 (θ, φ) 完全一致。
+ *         距黄斑的方位角在黄斑切平面内取(见 toMaculaFrame),黄斑居中时二者一致。
+ * - 本模块笛卡尔约定:黄斑位于 z = +R(黄斑基准系);极点系中扫描轴极点为 +z。
+ *   visualize.js 使用 z = -R(渲染朝向需要),两者仅差一个 z 轴翻转,角度量一致。
  */
 
 // 解剖学参考数据
@@ -73,6 +88,10 @@ export const ANATOMY = {
   scleraThickness: 0.6,       // 巩膜代表厚度 (mm)。赤道 ~0.6, 肌止端后最薄 ~0.4, 后极 ~1.0。
                               // 用于把视网膜内表面弧长换算为术中卡尺测量的外表面弧长。
 
+  // --- 视网膜范围 ---
+  serrataPolarAngleDeg: 117,  // 锯齿缘距后极的球心角 (度, 24mm 眼约值), 占球面约 72.7%。
+                              // 用作「视场占视网膜比例」的分母 (Optos 82% 口径即视网膜比例)。
+
   // 视盘大小 (变异大，仅供参考)
   discHorizontalDiameter: 1.79, // mm, 范围 0.91-2.76
   discVerticalDiameter: 1.97    // mm, 范围 1.08-2.76
@@ -86,36 +105,36 @@ function clamp(v, lo, hi) {
 }
 
 /**
- * 设备投影律: 图像归一化半径 ρ ↔ 视场角 θ_v
+ * 设备投影律: 图像归一化半径 ρ ↔ 视网膜球心角 θ_r
  *
  * ⚠️ 重要: Optos 原始图像的投影律**没有公开的闭式表达**。
  * 文献中的 "stereographic projection" 指的是 Optos 校正后**输出**的格式,
  * 而不是原始图像的规律。不同候选律给出的中心/周边面积比差异很大:
  *
- *   equidistant (视角)    ≈ 2.4×    ← 默认。扫描振镜按角度匀速扫描,物理上最合理
- *   stereographic (视角)  ≈ 4.3×
- *   equidistant (球心角)  ≈ 1.8×    ← 旧版本的隐含假设 (legacyRetinal)
+ *   等距 (ρ ∝ θ_r)   ≈ 1.8×   ← 默认。与 Croft 2014 (PMID 25037013) 实测的
+ *                              1.79× 中心/周边面积比吻合;且 100° 半场按球心角
+ *                              覆盖视网膜 ~80.7%,对齐 Optos 宣称的 82% 口径。
+ *   立体投影 (θ_r)    ≈ 4.3×
+ *   等立体角 (θ_r)    —— 介于两者之间
  *
- * Croft 2014 (PMID 25037013) 实测未校正图像中心/周边面积比约 1.79×。
+ * 因此这里把投影律做成**可切换参数**,但除等距外的律**仅供敏感性分析**。
+ * 要得到真正可靠的结果,应当用模型眼标定 ρ↔θ_r 的经验曲线来替换本表。
  *
- * 因此这里把投影律做成**可切换参数**。要得到真正可靠的结果,应当用模型眼
- * 标定 ρ↔θ_r 的经验曲线来替换本表(见 README「标定」一节)。
- *
- * radius(θ_v) → 约化半径;  angle(ρ) → θ_v。二者互为反函数。
+ * radius(θ_r) → 约化半径;  angle(ρ) → θ_r。二者互为反函数。
  */
 export const PROJECTION_LAWS = {
   equidistant: {
-    label: '等距 (ρ ∝ θ)',
+    label: '等距 (ρ ∝ θ_r, 球心角)',
     radius: (t) => t,
     angle: (r) => r
   },
   stereographic: {
-    label: '立体投影 (ρ ∝ tan(θ/2))',
+    label: '立体投影 (ρ ∝ tan(θ_r/2), 仅供敏感性分析)',
     radius: (t) => 2 * Math.tan(t / 2),
     angle: (r) => 2 * Math.atan(r / 2)
   },
   equisolid: {
-    label: '等立体角 (ρ ∝ sin(θ/2))',
+    label: '等立体角 (ρ ∝ sin(θ_r/2), 仅供敏感性分析)',
     radius: (t) => 2 * Math.sin(t / 2),
     angle: (r) => 2 * Math.asin(clamp(r / 2, -1, 1))
   }
@@ -127,6 +146,24 @@ export const DEFAULT_PROJECTION = 'equidistant';
 
 function getLaw(name) {
   return PROJECTION_LAWS[name] || PROJECTION_LAWS[DEFAULT_PROJECTION];
+}
+
+// --- 3D 向量小工具 (纯对象, 避免引入依赖) ---
+function dot(a, b) {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+function cross(a, b) {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x
+  };
+}
+
+function normalize(v) {
+  const len = Math.sqrt(dot(v, v));
+  return len > 1e-15 ? { x: v.x / len, y: v.y / len, z: v.z / len } : { x: 0, y: 0, z: 0 };
 }
 
 /**
@@ -231,21 +268,26 @@ function calculateCorneaSag(corneaDiameter, corneaRadius) {
 }
 
 /**
- * 构建投影模型 —— 图像归一化距离 ↔ 角度 的**唯一换算入口**
+ * 构建投影模型 —— 图像归一化距离 ↔ 角度 / 球面向量 的**唯一换算入口**
  *
  * mapper 与 visualize 都必须经由此函数,以保证两者一致。
  *
+ * 几何结构 (P0/P1):
+ *   - 投影极点 = 图像中心 (0.5, 0.5) = 扫描光轴落点。投影律绕它对称。
+ *   - fov 按球心角解释: 无视盘时 dist = 0.5 ⇒ θ_r = fov/2。
+ *   - 黄斑是**测量原点**: 距离/方位角在黄斑切平面内取,全部由点积实现。
+ *
  * 尺度 k 的确定:
- *   - 已标注视盘: 用盘-斑物理距离 4.5mm 反推其视角,锚定 k(推荐)
- *   - 未标注视盘: 用标称 FOV,令 dist = 0.5 处 θ_v = fov/2
+ *   - 已标注视盘: 一维求根,使盘-斑**测地距离** R·acos(uM·uD) = 4.5mm(推荐)
+ *   - 未标注视盘: 用标称 FOV,令 dist = 0.5 处 θ_r = fov/2
  *
  * @param {Object} options
  * @param {number} options.axialLength - 眼轴长度 (mm)
- * @param {number} options.fov - 标称视场角 (度, 视角)
+ * @param {number} options.fov - 标称视场角 (度, 球心角口径)
  * @param {number} options.corneaDiameter - 角膜直径 (mm)
  * @param {number} options.corneaKValue - 角膜曲率半径 (mm)
  * @param {string} options.projection - 投影律名, 见 PROJECTION_LAWS
- * @param {number} options.maculaX/maculaY - 黄斑归一化位置
+ * @param {number} options.maculaX/maculaY - 黄斑归一化位置 (测量原点)
  * @param {number} options.discX/discY - 视盘归一化位置 (可选, 用于标定)
  * @param {number} options.imageAspect - 图像宽高比
  * @returns {Object} 模型对象
@@ -270,55 +312,153 @@ export function createProjectionModel(options = {}) {
   const d = eyeGeometry.nodalOffset;
   const law = getLaw(projection);
 
-  const maxFieldAngle = (fov / 2) * DEG;
+  // P1: fov 按球心角解释 —— 标称视场边缘 (dist = 0.5) 处 θ_r = fov/2。
+  // maxFieldAngle 仅为展示/文献口径回算, 不进入投影链。
+  const maxRetinalAngle = (fov / 2) * DEG;
+  const maxFieldAngle = retinalToFieldAngle(maxRetinalAngle, R, d);
 
-  // 尺度 k: 约化半径 ρ = k · dist
+  /** 以尺度 kTry 把图像点反投影到扫描轴系单位向量 (极点 = 图像中心, +z) */
+  function unprojectAt(kTry, x, y) {
+    const dx = (x - 0.5) * imageAspect;
+    const dy = y - 0.5;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    const theta = law.angle(kTry * dist);          // 直接得球心角
+    const phi = Math.atan2(-dy, dx);               // 极点系方位角, 上方为正
+
+    return {
+      dist,
+      phi,
+      theta,
+      u: {
+        x: Math.sin(theta) * Math.cos(phi),
+        y: Math.sin(theta) * Math.sin(phi),
+        z: Math.cos(theta)
+      }
+    };
+  }
+
+  // --- 尺度 k ---
   let k;
   let calibration;
 
   const hasDisc = discX !== null && discX !== undefined && discY !== null && discY !== undefined;
-  let discDist = 0;
+  let discDist = 0; // 盘-斑在图像平面上的间隔 (仅用于判断可否求根)
   if (hasDisc) {
     const ddx = (discX - maculaX) * imageAspect;
     const ddy = discY - maculaY;
     discDist = Math.sqrt(ddx * ddx + ddy * ddy);
   }
 
+  const kFov = law.radius(maxRetinalAngle) / 0.5;
+
   if (hasDisc && discDist > 1e-6) {
-    // 物理锚点: 盘-斑 4.5mm → 球心角 → 视角
-    const discRetinalAngle = discToMaculaDistance / R;
-    const discFieldAngle = retinalToFieldAngle(discRetinalAngle, R, d);
-    k = law.radius(discFieldAngle) / discDist;
-    calibration = {
-      method: 'disc',
-      discDist,
-      discRetinalAngleDeg: discRetinalAngle * RAD,
-      discFieldAngleDeg: discFieldAngle * RAD
+    // 物理锚点: 求根使盘-斑测地距离 R·acos(uM·uD) = 4.5mm。
+    // g(k) 随 k 单调增 (标注合理时), 用二分。
+    const target = discToMaculaDistance / R;
+    const geodesicAt = (kTry) => {
+      const uM = unprojectAt(kTry, maculaX, maculaY).u;
+      const uD = unprojectAt(kTry, discX, discY).u;
+      return Math.acos(clamp(dot(uM, uD), -1, 1));
     };
+
+    let kHi = kFov;
+    let bracketed = geodesicAt(kHi) >= target;
+    for (let i = 0; !bracketed && i < 60; i++) {
+      kHi *= 2;
+      bracketed = geodesicAt(kHi) >= target;
+    }
+
+    if (bracketed) {
+      let lo = 0;
+      let hi = kHi;
+      for (let i = 0; i < 100; i++) {
+        const mid = (lo + hi) / 2;
+        if (geodesicAt(mid) < target) lo = mid;
+        else hi = mid;
+      }
+      k = (lo + hi) / 2;
+      calibration = {
+        method: 'disc',
+        discDist,
+        discRetinalAngleDeg: target * RAD,
+        discFieldAngleDeg: retinalToFieldAngle(target, R, d) * RAD
+      };
+    } else {
+      // 标注退化 (如盘-斑方位/距离无法夹住目标) → 回退 FOV
+      k = kFov;
+      calibration = { method: 'fov', discDist: 0 };
+    }
   } else {
-    // 退化: 用标称 FOV, dist = 0.5 处为视场边缘
-    k = law.radius(maxFieldAngle) / 0.5;
+    // 退化: 用标称 FOV, dist = 0.5 处为视场边缘 (θ_r = fov/2)
+    k = kFov;
     calibration = { method: 'fov', discDist: 0 };
   }
 
-  /** 归一化图像距离 → 视场角 (弧度) */
-  function fieldAngleAt(dist) {
+  /** 归一化图像距离 → 视网膜球心角 (弧度, 直接由投影律给出) */
+  function retinalAngleAt(dist) {
     return law.angle(k * dist);
   }
 
-  /** 归一化图像距离 → 视网膜球心角 (弧度) */
-  function retinalAngleAt(dist) {
-    return fieldToRetinalAngle(fieldAngleAt(dist), R, d);
+  /** 归一化图像距离 → 视场角 (弧度)。仅展示/文献口径的回算值 */
+  function fieldAngleAt(dist) {
+    return retinalToFieldAngle(retinalAngleAt(dist), R, d);
   }
 
   /** 视网膜球心角 → 归一化图像距离 */
   function distAtRetinalAngle(thetaR) {
-    return law.radius(retinalToFieldAngle(thetaR, R, d)) / k;
+    return law.radius(thetaR) / k;
   }
 
-  // 标称视场边缘对应的图像距离与球心角
-  const maxDist = law.radius(maxFieldAngle) / k;
-  const maxRetinalAngle = fieldToRetinalAngle(maxFieldAngle, R, d);
+  /** 图像点 → 扫描轴系 (极点 = 图像中心) */
+  function unproject(x, y) {
+    return unprojectAt(k, x, y);
+  }
+
+  // --- 黄斑测量框架 (解剖原点, 全点积) ---
+  const maculaPolar = unproject(maculaX, maculaY);
+  const uM = maculaPolar.u;
+
+  // 图像「上」方向 (0,1,0) 投影到黄斑切平面; 黄斑居中时即 +y
+  let up;
+  if (1 - uM.y * uM.y > 1e-12) {
+    up = normalize({ x: -uM.x * uM.y, y: 1 - uM.y * uM.y, z: -uM.y * uM.z });
+  } else {
+    // 退化保护: 黄斑在图像正上/下边缘时改用极点方向 (实际不会发生)
+    up = normalize({ x: -uM.x * uM.z, y: -uM.y * uM.z, z: 1 - uM.z * uM.z });
+  }
+  const right = cross(up, uM); // up × uM, 单位正交
+
+  /**
+   * 扫描轴系单位向量 → 黄斑基准测量框架
+   * theta = 距黄斑测地角; phi = 黄斑切平面方位角 (右 0°, 上 90°);
+   * x/y/z = 黄斑基准笛卡尔 (黄斑 z = +R), 是扫描系向量的刚性旋转。
+   */
+  function toMaculaFrame(u) {
+    const lx = dot(u, right);
+    const ly = dot(u, up);
+    const lz = dot(u, uM);
+
+    const theta = Math.acos(clamp(lz, -1, 1));
+    const sinTheta = Math.sqrt(Math.max(0, 1 - lz * lz));
+    const phi = sinTheta > 1e-12 ? Math.atan2(ly, lx) : 0;
+
+    return {
+      theta,
+      phi,
+      x: R * lx,
+      y: R * ly,
+      z: R * lz
+    };
+  }
+
+  // 标称视场边缘对应的图像距离
+  const maxDist = law.radius(maxRetinalAngle) / k;
+
+  // 视场占视网膜比例 (以锯齿缘为界, 对齐 Optos 82% 宣称口径)
+  const serrataAngle = ANATOMY.serrataPolarAngleDeg * DEG;
+  const retinalCoverage =
+    (1 - Math.cos(Math.min(Math.PI, maxRetinalAngle))) / (1 - Math.cos(serrataAngle));
 
   return {
     eyeGeometry,
@@ -328,24 +468,31 @@ export function createProjectionModel(options = {}) {
     law,
     scale: k,
     calibration,
-    maxFieldAngle,
-    maxRetinalAngle,
+    maxFieldAngle,               // 展示用回算 (fov/2 对应的视角)
+    maxRetinalAngle,             // = fov/2 (球心角)
     maxDist,
     imageAspect,
     maculaX,
     maculaY,
+    poleX: 0.5,                  // 投影极点 = 图像中心 (扫描轴)
+    poleY: 0.5,
+    maculaVector: uM,            // 黄斑在扫描轴系的单位向量
+    maculaTheta: maculaPolar.theta,
+    maculaPhi: maculaPolar.phi,
+    unproject,                   // (x, y) → {dist, phi, theta, u} 扫描轴系
+    toMaculaFrame,               // (u) → {theta, phi, x, y, z} 黄斑基准
     fieldAngleAt,
     retinalAngleAt,
     distAtRetinalAngle,
-    /** 视网膜覆盖比例 (0-1), 用于判断模型是否合理 */
-    retinalCoverage: (1 - Math.cos(Math.min(Math.PI, maxRetinalAngle))) / 2
+    /** 视场占视网膜比例 (0-1), 以锯齿缘 (≈117° 球心角) 为界 */
+    retinalCoverage
   };
 }
 
 /**
  * 计算视网膜参数
  * @param {number} axialLength - 眼轴长度 (mm)
- * @param {number} fov - 视场角 (度, 视角)
+ * @param {number} fov - 视场角 (度, 球心角口径)
  * @param {number} imageWidth - 图像宽度 (像素), 用于计算分辨率
  * @returns {Object} 视网膜参数
  */
@@ -353,15 +500,14 @@ export function calculateRetinalParameters(axialLength = 24, fov = 200, imageWid
   const model = createProjectionModel({ axialLength, fov, ...options });
   const retinalRadius = model.R;
 
-  // 全视场对应的视网膜弧长(经结点角转换,不再直接用 R·fovRad)
+  // 全视场对应的视网膜弧长 = R·fov (球心角口径下不再有结点放大)
   const retinalArc = retinalRadius * model.maxRetinalAngle * 2;
 
   const degPerPixel = fov / imageWidth;           // 视场度/像素
   const mmPerPixel = retinalArc / imageWidth;     // mm/像素 (全场平均值)
 
-  // 中心处的局部尺度 —— 比全场平均值更有意义。
-  // 注意方向: 中心像素代表的视网膜面积**大于**周边像素(周边在图像上被放大),
-  // 与 Croft 2014 "后极像素面积比周边大 79%" 一致。故 mmPerPixelCenter > mmPerPixel。
+  // 中心处的局部尺度。默认等距律 (ρ ∝ θ_r) 下全场恒定,与平均值相等;
+  // 其它律 (敏感性分析) 下中心与周边不同, 保留探测以反映该差异。
   const probe = 1e-4;
   const mmPerNormalizedUnit = (retinalRadius * model.retinalAngleAt(probe)) / probe;
   const mmPerPixelCenter = mmPerNormalizedUnit / imageWidth;
@@ -382,51 +528,51 @@ export function calculateRetinalParameters(axialLength = 24, fov = 200, imageWid
 }
 
 /**
- * 将图像坐标转换为球面坐标
+ * 将图像坐标转换为球面坐标 (黄斑基准)
+ *
+ * 内部流程: 绕图像中心(扫描轴极点)解投影 → 球面单位向量 → 黄斑测量框架。
+ * 返回的 theta 为距黄斑的**测地球心角**, phi 为黄斑切平面方位角,
+ * x/y/z 为黄斑基准笛卡尔坐标 (黄斑 z = +R)。
  *
  * @param {number} x - 图像 x 坐标 (0-1 归一化)
  * @param {number} y - 图像 y 坐标 (0-1 归一化)
  * @param {number} axialLength - 眼轴长度 (mm)
- * @param {number} fov - 视场角 (度)
+ * @param {number} fov - 视场角 (度, 球心角口径)
  * @param {Object} options - 见 createProjectionModel;也可直接传入 options.model 复用模型
- * @returns {Object} 球面坐标 {theta, phi, x, y, z}
+ * @returns {Object} 球面坐标 {theta, phi, fieldAngle, x, y, z, dist, ...}
  */
 export function imageToSphere(x, y, axialLength = 24, fov = 200, options = {}) {
   const model = options.model || createProjectionModel({ axialLength, fov, ...options });
-  const { maculaX, maculaY, imageAspect } = model;
-
-  const dx = (x - maculaX) * imageAspect;
-  const dy = y - maculaY;
-
-  // 归一化距离: 标称视场边缘为 model.maxDist (FOV 标定时 = 0.5)
-  const dist = Math.sqrt(dx * dx + dy * dy);
-
-  const theta = model.retinalAngleAt(dist);
-  const fieldAngle = model.fieldAngleAt(dist);
-
-  // 方位角: 图像 y 轴向下, 取负号使上方为正
-  const phi = Math.atan2(-dy, dx);
-
   const R = model.R;
 
-  // 黄斑在 z = +R
-  const sphereX = R * Math.sin(theta) * Math.cos(phi);
-  const sphereY = R * Math.sin(theta) * Math.sin(phi);
-  const sphereZ = R * Math.cos(theta);
+  // 极点系 (图像中心) 位置
+  const p = model.unproject(x, y);
+
+  // 黄斑基准测量框架
+  const m = model.toMaculaFrame(p.u);
+
+  const theta = m.theta;
+  const phi = m.phi;
+
+  // 视场角仅作展示回算
+  const fieldAngle = retinalToFieldAngle(theta, R, model.nodalOffset);
 
   return {
-    theta,                      // 视网膜球心角 (弧度)
-    phi,                        // 方位角 (弧度)
-    fieldAngle,                 // 视场角 (弧度)
-    x: sphereX,
-    y: sphereY,
-    z: sphereZ,
-    dist,                       // 归一化图像距离
-    r: model.maxDist > 0 ? dist / model.maxDist : 0, // 相对视场边缘的比例
+    theta,                      // 距黄斑的测地球心角 (弧度)
+    phi,                        // 黄斑切平面方位角 (弧度)
+    fieldAngle,                 // 结点视角 (回算, 弧度)
+    x: m.x,
+    y: m.y,
+    z: m.z,                     // 黄斑基准笛卡尔, 黄斑 z = +R
+    dist: p.dist,               // 距图像中心 (投影极点) 的归一化距离
+    r: model.maxDist > 0 ? p.dist / model.maxDist : 0, // 相对视场边缘的比例
     angleDeg: theta * RAD,      // 球心角 (度)
     fieldAngleDeg: fieldAngle * RAD,
     arcFromMaculaMm: R * theta,
-    isValid: dist <= model.maxDist + 1e-9
+    isValid: p.dist <= model.maxDist + 1e-9,
+    u: p.u,                     // 扫描轴系单位向量
+    poleTheta: p.theta,         // 极点系 (图像中心) 球心角
+    polePhi: p.phi              // 极点系方位角
   };
 }
 
@@ -463,8 +609,9 @@ export function calculateMaculaFromDisc(
   const verticalAngle = ANATOMY.discToMaculaVertical;  // 视角, 下方
   const totalFieldAngle = Math.sqrt(horizontalAngle * horizontalAngle + verticalAngle * verticalAngle) * DEG;
 
-  // 该视角对应的归一化图像距离
-  const dist = model.law.radius(totalFieldAngle) / model.scale;
+  // 文献视角 → 球心角 (结点换算仅用于此类文献数据) → 归一化图像距离
+  const totalCentralAngle = fieldToRetinalAngle(totalFieldAngle, model.R, model.nodalOffset);
+  const dist = model.law.radius(totalCentralAngle) / model.scale;
 
   // 方向单位向量 (图像坐标系, y 向下)
   const len = Math.sqrt(horizontalAngle * horizontalAngle + verticalAngle * verticalAngle);
@@ -709,21 +856,20 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
     imageAspect
   });
 
-  const dx = (imageX - maculaX) * imageAspect;
-  const dy = imageY - maculaY;
+  // 极点系 → 黄斑基准测地量
+  const p = model.unproject(imageX, imageY);
+  const m = model.toMaculaFrame(p.u);
 
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  const phi = Math.atan2(-dy, dx);
-
-  const theta = model.retinalAngleAt(dist);       // 球心角 (弧度)
-  const fieldAngle = model.fieldAngleAt(dist);    // 视场角 (弧度)
+  const theta = m.theta;                              // 距黄斑测地球心角 (弧度)
+  const phi = m.phi;                                 // 黄斑切平面方位角 (弧度)
+  const fieldAngle = retinalToFieldAngle(theta, model.R, model.nodalOffset); // 回算视角
   const angleDeg = theta * RAD;
 
   const distanceMm = model.R * theta;
 
   // --- 不确定性传播 ---
   // 盘-斑锚点的群体变异 (4.0-5.0mm) 是 disc 模式下距离换算的主要误差源。
-  // 标定尺度 k 与该锚点近似线性,故在范围两端重算即可包出真实距离的区间。
+  // 在范围两端各自重新求根建模型,在同一裂孔图像点重算测地距离即可包出区间。
   // FOV 回退模式没有任何物理锚点,误差不可量化,只能标记为 unbounded。
   let distanceMmLow = distanceMm;
   let distanceMmHigh = distanceMm;
@@ -732,12 +878,13 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
   if (model.calibration.method === 'disc') {
     const [lo, hi] = ANATOMY.discToMaculaDistanceRange;
     const evalAt = (dmm) => {
-      const m = createProjectionModel({
+      const mm = createProjectionModel({
         axialLength, fov, corneaDiameter, corneaKValue, projection,
         maculaX, maculaY, discX: disc.x, discY: disc.y, imageAspect,
         discToMaculaDistance: dmm
       });
-      return m.R * m.retinalAngleAt(dist);
+      const pp = mm.unproject(imageX, imageY);
+      return mm.R * mm.toMaculaFrame(pp.u).theta;
     };
     distanceMmLow = evalAt(lo);
     distanceMmHigh = evalAt(hi);
@@ -760,8 +907,8 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
     fieldAngleDeg: fieldAngle * RAD,
     phi,
     phiDeg: phi * RAD,
-    dist,
-    isBeyondNominalField: dist > model.maxDist,
+    dist: p.dist,                                  // 距图像中心 (投影极点)
+    isBeyondNominalField: p.dist > model.maxDist,
     calibration: model.calibration,
     projection: model.projection,
     model
@@ -774,9 +921,12 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
  * 两项修正(相对早期版本):
  *
  * 1. angle alpha —— 中心凹并不在角膜缘圆的极点上,而在光轴颞侧约 5°。
- *    角膜缘圆是绕**光轴**的等纬圆,所以必须先把裂孔的角度换算到以光轴极点为基准:
- *      cos θ_opt = cos α·cos θ + sin α·sin θ·cos(φ - φ_nasal)
- *    (球面余弦定理; φ_nasal 为从黄斑指向光轴极点的方位, 即鼻侧方向)
+ *    角膜缘圆是绕**光轴**的等纬圆。本函数在黄斑基准系 (黄斑 = +z) 内用
+ *    3D 向量实现: 光轴极点 = 黄斑向鼻侧旋转 α,
+ *      uAxis = cosα·ẑ + sinα·e_nasal
+ *      θ_opt = acos(u_h · uAxis)
+ *    与旧球面余弦定理公式恒等 (子午线特例 60∓α 不变),但天然兼容任意偏心
+ *    输入,并与 visualize 中裂孔→角膜缘黄线使用同一几何。
  *    未提供 phiDeg 时退化为 α = 0(旧行为)。
  *
  * 2. 内/外表面 —— 术中卡尺沿**巩膜外表面**测量,半径为 R + 巩膜厚度。
@@ -784,7 +934,7 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
  *
  * ⚠️ 仍未建模: 角膜与前部巩膜并不落在同一球面上,因此靠近角膜缘处仍有高估。
  *
- * @param {number} thetaDeg - 裂孔到黄斑的**球心角** (度)
+ * @param {number} thetaDeg - 裂孔到黄斑的**球心角** (度, 测地距离/R)
  * @param {number} axialLength - 眼轴长度 (mm)
  * @param {number} corneaDiameter - 角膜直径 WTW (mm), 可选
  * @param {number} corneaKValue - 角膜曲率半径 (mm), 可选
@@ -806,7 +956,7 @@ export function calculateLimbusDistance(
   const theta = thetaDeg * DEG;
   const arcToMaculaMm = R * theta;
 
-  // --- angle alpha 子午线修正 ---
+  // --- angle alpha 修正 (3D 向量形式, 黄斑基准系: 黄斑 = +z) ---
   let thetaFromOpticalAxis = theta;
   let alphaApplied = 0;
 
@@ -817,11 +967,21 @@ export function calculateLimbusDistance(
     const phiNasal = eyeSide === 'right' ? 0 : Math.PI;
     const phi = phiDeg * DEG;
 
-    const cosThetaOpt =
-      Math.cos(alpha) * Math.cos(theta) +
-      Math.sin(alpha) * Math.sin(theta) * Math.cos(phi - phiNasal);
+    // 裂孔向量 (黄斑基准系)
+    const uH = {
+      x: Math.sin(theta) * Math.cos(phi),
+      y: Math.sin(theta) * Math.sin(phi),
+      z: Math.cos(theta)
+    };
 
-    thetaFromOpticalAxis = Math.acos(clamp(cosThetaOpt, -1, 1));
+    // 光轴极点 = 黄斑向鼻侧转 α
+    const uAxis = {
+      x: Math.sin(alpha) * Math.cos(phiNasal),
+      y: Math.sin(alpha) * Math.sin(phiNasal),
+      z: Math.cos(alpha)
+    };
+
+    thetaFromOpticalAxis = Math.acos(clamp(dot(uH, uAxis), -1, 1));
     alphaApplied = angleAlpha;
   }
 

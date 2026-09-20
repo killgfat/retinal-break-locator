@@ -261,7 +261,9 @@ function updateVisualizationMarkers() {
     hole: markers.hole.set ? { x: markers.hole.x, y: markers.hole.y } : null
   };
   
-  setMarkers(markerData);
+  // 眼别用于裂孔→角膜缘黄线的 angle alpha 修正
+  const { side: eyeSide } = resolveEyeSide();
+  setMarkers(markerData, { eyeSide });
 }
 
 function updateHoleInfo() {
@@ -322,7 +324,7 @@ function updateHoleInfo() {
     `${distText}${distUncertainty} mm (${breakResult.angleDeg.toFixed(1)}°)`;
   document.getElementById('hole-direction').textContent = `黄斑${direction}`;
   document.getElementById('hole-sphere').textContent =
-    `θ=${breakResult.angleDeg.toFixed(1)}° (视角${breakResult.fieldAngleDeg.toFixed(1)}°), φ=${phiDeg.toFixed(1)}° · ${calibNote}`;
+    `θ=${breakResult.angleDeg.toFixed(1)}° (结点视角${breakResult.fieldAngleDeg.toFixed(1)}°), φ=${phiDeg.toFixed(1)}° · ${calibNote}`;
   document.getElementById('hole-limbus-distance').textContent = `${limbusResult.limbusToBreakExternalMm.toFixed(2)} mm`;
   document.getElementById('hole-limbus-distance-inner').textContent = `${limbusResult.limbusToBreakMm.toFixed(2)} mm`;
   document.getElementById('hole-clock-position').textContent = clockPosition;
@@ -442,9 +444,9 @@ function updateInfo() {
   const eyeGeometry = calculateEyeGeometry(geo.axialLength, geo.corneaDiameter, geo.corneaKValue);
 
   document.getElementById('retina-radius').textContent = `${eyeGeometry.retinalRadius.toFixed(2)} mm`;
-  // 中心处局部尺度比全场平均值更有意义(周边被显著压缩)
+  // 等距球心角口径下中心与全场的像素尺度一致;覆盖比例为占视网膜 (以锯齿缘为界)
   document.getElementById('pixel-scale').textContent =
-    `${params.mmPerPixelCenter.toFixed(4)} mm/px (中心) · 覆盖 ${(params.retinalCoverage * 100).toFixed(0)}%`;
+    `${params.mmPerPixelCenter.toFixed(4)} mm/px · 视网膜覆盖 ${(params.retinalCoverage * 100).toFixed(0)}%`;
 
   if (currentImage) {
     updateTexture(currentImage, getTextureOptions());
