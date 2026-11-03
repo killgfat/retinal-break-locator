@@ -89,8 +89,21 @@ export const ANATOMY = {
   corneaThickness: 0.5,       // 角膜中央厚度 (mm), 约 0.5mm
 
   // --- 巩膜 ---
-  scleraThickness: 0.6,       // 巩膜代表厚度 (mm)。赤道 ~0.42, 肌止端后最薄 ~0.3, 后极 ~1.0。
-                              // 用于把视网膜内表面弧长换算为术中卡尺测量的外表面弧长。
+  scleraThickness: 0.6,       // 代表厚度 (mm), 仅作缺省/参考。实际换算用下面的剖面。
+
+  // 巩膜厚度沿子午线的剖面 (文献群体值, 非个体测量)
+  // 来源: Vurgese 2012 / Norman 2010 一类的眼库组织学测量, 眼轴 ≤26mm 组;
+  //   limbus 0.50±0.11, ora serrata 0.43±0.14, equator 0.42±0.15,
+  //   equator-pole 中点 0.65±0.15, posterior pole 0.94±0.18。
+  // θ 自后极量起。线性插值, 两端外推取端点值。
+  // ⚠️ 这是**群体平均**, 个体差异 SD 0.11-0.18mm, 未建模鼻颞/上下不对称。
+  scleraThicknessProfile: [
+    { thetaDeg: 0,   thickness: 0.94 },  // 后极 (最厚)
+    { thetaDeg: 45,  thickness: 0.65 },  // 赤道-后极中点
+    { thetaDeg: 90,  thickness: 0.42 },  // 赤道 (最薄)
+    { thetaDeg: 117, thickness: 0.43 },  // 锯齿缘 / 直肌止端
+    { thetaDeg: 149, thickness: 0.50 }   // 角膜缘
+  ],
 
   // --- 前段几何 (角膜缘 → 赤道) ---
   limbusToEquatorArc: 11.5,   // 解剖弧长 (mm)。文献 9-12 (另有 13-14 的口径, 差在是否沿表面量)。
@@ -484,8 +497,62 @@ export function calculateEyeGeometry(
     corneaDiameter: wtw,
     corneaRadius: kValue,
     corneaThickness: ANATOMY.corneaThickness,
-    scleraThickness: ANATOMY.scleraThickness
+    // 代表厚度 (后极-赤道均值), 仅用于展示; 弧长换算走 scleraThicknessAt(θ) 剖面
+    scleraThickness: ANATOMY.scleraThickness,
+    // 角膜缘处的角位置: 赤道 + 前段弧长 / 前段半径。
+    // 与 limbusPolarAngle (等效球反推 149.37°) 差 1.9° —— 外表面厚度积分必须用这个,
+    // 否则会多算 0.05mm。
+    limbusAngleAnterior: Math.PI / 2 + limbusToEquatorArc / anteriorRadius
   };
+}
+
+/**
+ * 巩膜厚度剖面 (θ 自后极量起, 线性插值)
+ *
+ * @param {number} thetaRad - 球心角 (弧度)
+ * @returns {number} 厚度 (mm)
+ */
+export function scleraThicknessAt(thetaRad) {
+  const profile = ANATOMY.scleraThicknessProfile;
+  const deg = Math.abs(thetaRad) * RAD;
+
+  if (deg <= profile[0].thetaDeg) return profile[0].thickness;
+  const last = profile[profile.length - 1];
+  if (deg >= last.thetaDeg) return last.thickness;
+
+  for (let i = 1; i < profile.length; i++) {
+    const a = profile[i - 1];
+    const b = profile[i];
+    if (deg <= b.thetaDeg) {
+      const w = (deg - a.thetaDeg) / (b.thetaDeg - a.thetaDeg);
+      return a.thickness + w * (b.thickness - a.thickness);
+    }
+  }
+  return last.thickness;
+}
+
+/**
+ * 内外表面弧长差: 法向等距偏移下 Δs = ∫ t(θ) dθ
+ *
+ * 推导: 内表面 ds = ρ(θ)dθ, 沿法向偏移 t 后 ds' = (ρ+t)dθ,
+ *       故 s' − s = ∫ t dθ (一阶精确, t ≪ ρ 时误差 O(t²/ρ))。
+ * 这比「半轴各加 t 再积分」更干净 —— 后者隐含沿坐标轴偏移, 且对前段不成立。
+ *
+ * @param {number} fromRad - 起点球心角 (弧度), 自后极量起
+ * @param {number} toRad - 终点球心角 (弧度); 可小于 fromRad, 此时返回负值
+ * @param {number} n - Simpson 分段数
+ * @returns {number} 弧长差 (mm), **有向**
+ */
+export function scleraThicknessIntegral(fromRad, toRad, n = 32) {
+  const h = (toRad - fromRad) / n;
+  if (Math.abs(h) < 1e-15) return 0;
+
+  let sum = 0;
+  for (let i = 0; i <= n; i++) {
+    const f = scleraThicknessAt(fromRad + i * h);
+    sum += i === 0 || i === n ? f : (i % 2 ? 4 * f : 2 * f);
+  }
+  return (sum * h) / 3;
 }
 
 function calculateCorneaSag(corneaDiameter, corneaRadius) {
@@ -1292,28 +1359,18 @@ export function calculateLimbusDistance(
     limbusToBreakMm = Math.max(0, R * (eyeGeometry.limbusPolarAngle - thetaFromOpticalAxis));
   }
 
-  // 外表面: 前段球 + 巩膜厚度, 后段椭球各半轴 + 巩膜厚度。
+  // --- 外表面 (术中标尺所量) ---
   //
-  // ⚠️ 前段必须由**内表面前段**按同一半径比例放大, 不能另用
-  // (R + t)·(limbusPolarAngle − 90°): limbusPolarAngle 来自等效球拟合,
-  // 与解剖常数 limbusToEquatorArc 不是同一个几何, 两者会凭空差 1mm。
-  const t = eyeGeometry.scleraThickness;
-  const anteriorOuterArc = eyeGeometry.limbusToEquatorArc *
-    ((eyeGeometry.anteriorRadius + t) / eyeGeometry.anteriorRadius);
+  // 法向等距偏移的一阶精确结果: ds' = (ρ + t(θ))dθ, 故 s' = s + ∫ t dθ,
+  // 积分区间沿**实际路径** (裂孔 → 角膜缘)。厚度的位置依赖不能省:
+  // 后极 0.94、赤道 0.42、角膜缘 0.50, 用常数 0.6 会把后极低估 0.34mm。
+  //
+  // 前段的角跨度必须与内表面一致: limbusToEquatorArc / anteriorRadius,
+  // 而不是等效球反推的 limbusPolarAngle —— 后者差 1.9°, 会凭空多算 0.05mm。
+  const limbusAngleAnterior = eyeGeometry.limbusAngleAnterior;
 
-  const semiAxesOuter = {
-    horizontal: semiAxes.horizontal + t,
-    vertical: semiAxes.vertical + t,
-    axial: semiAxes.axial + t
-  };
-  let limbusToBreakExternalMm;
-  if (thetaFromOpticalAxis <= serrata) {
-    const equatorArcOuter = meridianArcLength(equator, semiAxesOuter, meridian);
-    limbusToBreakExternalMm = anteriorOuterArc + equatorArcOuter -
-      meridianArcLength(thetaFromOpticalAxis, semiAxesOuter, meridian);
-  } else {
-    limbusToBreakExternalMm = Math.max(0, (R + t) * (eyeGeometry.limbusPolarAngle - thetaFromOpticalAxis));
-  }
+  const limbusToBreakExternalMm = Math.max(0,
+    limbusToBreakMm + scleraThicknessIntegral(thetaFromOpticalAxis, limbusAngleAnterior));
 
   return {
     arcToMaculaMm,

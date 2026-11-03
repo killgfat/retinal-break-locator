@@ -7,6 +7,8 @@ import {
   meridianArcLength,
   meridianThetaFromArc,
   retinalSemiAxes,
+  scleraThicknessAt,
+  scleraThicknessIntegral,
   createProjectionModel,
   fieldToRetinalAngle,
   retinalToFieldAngle,
@@ -722,30 +724,52 @@ describe('calculateLimbusDistance', () => {
     expect(result.limbusToBreakMm).toBeCloseTo(eyeGeometry.limbusToEquatorArc, 9);
   });
 
-  it('scales the anterior segment by the same radius ratio on both surfaces', () => {
-    // θ=90° 时只剩前段 (角膜缘→赤道)。外表面必须由内表面按同一半径比例放大,
-    // 不能另用 (R+t)·(limbusPolarAngle−90°): 后者与解剖常数不是同一个几何,
-    // 会凭空多出约 1mm (曾导致 θ=0 处内外差 1.96mm)。
+  it('adds exactly ∫t(θ)dθ between the two surfaces', () => {
+    // 法向等距偏移: ds' = (ρ + t)dθ ⇒ s' − s = ∫t dθ (一阶精确)。
+    // 这条恒等式必须对任意 θ 成立, 且不依赖前后段如何拼接。
     const g = calculateEyeGeometry(24);
-    const atEquator = calculateLimbusDistance(90);
-    const expectedRatio = (g.anteriorRadius + g.scleraThickness) / g.anteriorRadius;
 
-    expect(atEquator.limbusToBreakMm).toBeCloseTo(g.limbusToEquatorArc, 9);
-    expect(atEquator.limbusToBreakExternalMm / atEquator.limbusToBreakMm)
-      .toBeCloseTo(expectedRatio, 9);
-    // 差值应约为 厚度×弧长/半径 ≈ 0.6mm, 而不是 1.6mm
-    expect(atEquator.limbusToBreakExternalMm - atEquator.limbusToBreakMm)
-      .toBeLessThan(0.8);
+    for (const deg of [0, 15, 30, 45, 60, 75, 90, 105, 117]) {
+      const r = calculateLimbusDistance(deg);
+      const expected = scleraThicknessIntegral(
+        deg * DEG, g.limbusAngleAnterior
+      );
+      expect(r.limbusToBreakExternalMm - r.limbusToBreakMm)
+        .toBeCloseTo(expected, 9);
+    }
   });
 
-  it('keeps the internal/external ratio near t/R across the whole posterior retina', () => {
-    const g = calculateEyeGeometry(24);
-    const ratio = 1 + g.scleraThickness / g.anteriorRadius;   // ≈ 1.052
+  it('uses the literature thickness profile, not a constant', () => {
+    // 后极 0.94 → 赤道 0.42 → 角膜缘 0.50, 用常数 0.6 会把后极低估 0.34mm
+    expect(scleraThicknessAt(0)).toBeCloseTo(0.94, 9);
+    expect(scleraThicknessAt(45 * DEG)).toBeCloseTo(0.65, 9);
+    expect(scleraThicknessAt(90 * DEG)).toBeCloseTo(0.42, 9);
+    expect(scleraThicknessAt(117 * DEG)).toBeCloseTo(0.43, 9);
+    // 线性插值, 单调区间内严格介于两端
+    const mid = scleraThicknessAt(30 * DEG);
+    expect(mid).toBeLessThan(scleraThicknessAt(0));
+    expect(mid).toBeGreaterThan(scleraThicknessAt(45 * DEG));
+  });
 
+  it('thickness integral is signed and additive', () => {
+    const a = 20 * DEG;
+    const b = 60 * DEG;
+    const c = 100 * DEG;
+    expect(scleraThicknessIntegral(a, b) + scleraThicknessIntegral(b, c))
+      .toBeCloseTo(scleraThicknessIntegral(a, c), 9);
+    // 反向积分取负
+    expect(scleraThicknessIntegral(b, a))
+      .toBeCloseTo(-scleraThicknessIntegral(a, b), 9);
+  });
+
+  it('keeps the internal/external ratio in the 1.03-1.07 band', () => {
+    // 厚度 0.42-0.94 / 半径 11.5 ⇒ 比值 1.036-1.082。旧常数 0.6 给 1.052 恒定,
+    // 现在的剖面应让远处 (剩余路径长、含后极厚段) 的比值略高。
     for (const t of [0, 30, 60, 90, 117]) {
       const r = calculateLimbusDistance(t);
-      expect(r.limbusToBreakExternalMm / r.limbusToBreakMm)
-        .toBeCloseTo(ratio, 1);
+      const ratio = r.limbusToBreakExternalMm / r.limbusToBreakMm;
+      expect(ratio).toBeGreaterThan(1.03);
+      expect(ratio).toBeLessThan(1.09);
     }
     // 差值随剩余弧长单调下降 (θ 越大, 还剩越短的一段)
     const far = calculateLimbusDistance(0);
