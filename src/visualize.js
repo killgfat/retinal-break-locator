@@ -138,8 +138,13 @@ export function createEyeballGeometry(eyeGeometry) {
   const halfCornea = corneaDiameter / 2;
   const latEquator = Math.PI / 2;
 
-  // 前段可视化用等效球极角 (与角膜直径自洽: sin(lat) = WTW/2 / R_ant)
-  const latLimbus = eyeGeometry.limbusPolarAngle;
+  // 角膜缘极角必须由 WTW 直接反解: sin(latLimbus) = (WTW/2) / R_ant。
+  //
+  // 不能用 limbusPolarAngle (等效球反推) 或 90°+arc/R_ant:
+  //   - 前者在 AL≤22 时给出 radial 6.2 > 5.85, 角膜判据 radial≤WTW/2 整圈落空
+  //   - 后者在 AL≥24 时同样落空 (赤道半轴越大, 同样的弧长对应更大纬圈)
+  // 代价: 前段弧长随 AL 略变 (AL=30 时 13mm vs 测量链的 11.5mm), 仅影响线框外观。
+  const latLimbus = Math.PI - Math.asin(Math.min(1, halfCornea / anteriorRadius));
   const limbusRingRadius = anteriorRadius * Math.sin(latLimbus);
   // 角膜缘处的轴向坐标 (黄斑方向为正, 前方为负)
   const axialLimbus = anteriorRadius * Math.cos(latLimbus);
@@ -173,9 +178,10 @@ export function createEyeballGeometry(eyeGeometry) {
         axial = a * Math.cos(latAngle);
       }
 
-      // 角膜球冠 (最前一圈): 极径 ≤ 角膜半径的前段顶点改成球冠
-      if (latAngle > latEquator && radial <= halfCornea) {
-        const localR = radial;
+      // 角膜球冠: 极径 ≤ 角膜半径的前段顶点改成球冠。
+      // 加浮点容差, 避免最后一圈因 1e-15 误差被漏掉。
+      if (latAngle > latEquator && radial <= halfCornea + 1e-9) {
+        const localR = Math.min(radial, halfCornea);
         axial = corneaApex + corneaRadius -
           Math.sqrt(Math.max(0, corneaRadius * corneaRadius - localR * localR));
       }
@@ -271,8 +277,6 @@ export function createRetinalSphereGeometry(model, segments = 128) {
   const normals = [];
   const uvs = [];
   const indices = [];
-
-  const radius = model.R;
 
   // 只绘制标称视场以内的部分
   const maxNormalizedRadius = model.maxDist;

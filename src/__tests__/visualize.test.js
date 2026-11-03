@@ -56,6 +56,39 @@ describe('createEyeballGeometry (三段式轮廓)', () => {
     }
   });
 
+  it('always includes a corneal cap, for every axial length', () => {
+    // 回归: latLimbus 曾用等效球反推, AL≤22 时 radial 6.2 > WTW/2 5.85,
+    // 角膜判据整圈落空, 线框上前段直接断开。必须由 WTW 反解。
+    for (const al of [20, 21, 22, 23, 24, 26, 28, 30]) {
+      const g = calculateEyeGeometry(al);
+      const geo = createEyeballGeometry(g);
+      const p = geo.attributes.position.array;
+
+      let maxZ = -Infinity;
+      let zAtApex = 0;
+      for (let i = 0; i < p.length; i += 3) {
+        if (p[i + 2] > maxZ) { maxZ = p[i + 2]; zAtApex = p[i + 2]; }
+      }
+      // 角膜顶点: 径向≈0, 轴向最前
+      expect(zAtApex).toBeGreaterThan(0);
+
+      // 赤道处的前后坐标 (约 0) 与角膜顶点之间应有明显凸出
+      const g2 = g.equatorialRadius.horizontal;
+      expect(maxZ).toBeGreaterThan(g2 * 0.75);
+
+      // 角膜缘那一圈必须存在且径向 ≤ WTW/2
+      const halfWtw = g.corneaDiameter / 2;
+      let foundLimbus = false;
+      for (let i = 0; i < p.length; i += 3) {
+        const rad = Math.hypot(p[i], p[i + 1]);
+        if (Math.abs(rad - halfWtw) < 0.02 && p[i + 2] > 0) foundLimbus = true;
+      }
+      expect(foundLimbus).toBe(true);
+
+      geo.dispose();
+    }
+  });
+
   it('the anterior sphere radius is independent of axial length', () => {
     // 赤道直径几乎不随眼轴变化 ⇒ 前段轮廓也必须基本不变
     const a = createEyeballGeometry(calculateEyeGeometry(22));
