@@ -486,8 +486,12 @@ function updateInfo() {
     sourceNote +
     (eyeGeometry.semiAxesExtrapolated ? ' (外推)' : '');
   // 等距球心角口径下中心与全场的像素尺度一致;覆盖比例为占视网膜 (以锯齿缘为界)
+  const calibNote = params.calibrationMethod === 'disc'
+    ? ` · 赤道@r=${params.equatorDist.toFixed(2)}${params.kRatio < 0.75 || params.kRatio > 1.33 ? ' ⚠标定与FOV不一致' : ''}`
+    : '';
   document.getElementById('pixel-scale').textContent =
-    `${params.mmPerPixelCenter.toFixed(4)} mm/px · 视网膜覆盖 ${(params.retinalCoverage * 100).toFixed(0)}%`;
+    `${params.mmPerPixelCenter.toFixed(4)} mm/px · 视网膜覆盖 ${(params.retinalCoverage * 100).toFixed(0)}%` +
+    calibNote;
 
   // 没有图像时也要更新参考眼球: 否则改眼轴只有文字变、线框不动
   updateReferenceGeometry(eyeGeometry);

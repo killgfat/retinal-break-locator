@@ -895,6 +895,15 @@ export function calculateRetinalParameters(axialLength = 24, fov = 200, imageWid
     (meridianArcLength(model.retinalAngleAt(probe), model.semiAxes, 0) / probe);
   const mmPerPixelCenter = mmPerNormalizedUnit / imageWidth;
 
+  // --- 标定自洽性诊断 ---
+  // 赤道 (θ=90°) 落在图像半径的哪个位置。等距律下 dist = θ/k。
+  //   ~0.45  ⇒ 与 200° 视场口径一致
+  //   < 0.2   ⇒ k 偏大, 图像边缘会被推到远超出赤道的位置 (视觉上"赤道贴到角膜缘")
+  //   > 0.5   ⇒ 赤道在视场外
+  const equatorDist = (Math.PI / 2) / model.scale;
+  const kFov = model.law.radius(model.maxRetinalAngle) / 0.5;
+  const kRatio = model.scale / kFov;   // disc 标定 / FOV 口径
+
   return {
     axialLength,
     retinalRadius,
@@ -908,7 +917,13 @@ export function calculateRetinalParameters(axialLength = 24, fov = 200, imageWid
     retinalArc,
     maxRetinalAngleDeg: model.maxRetinalAngle * RAD,
     retinalCoverage: model.retinalCoverage,
-    degPerMm: RAD / model.opticalRadius
+    degPerMm: RAD / model.opticalRadius,
+
+    equatorDist,                       // 赤道所在的归一化图像半径
+    equatorInsideField: equatorDist <= model.maxDist,
+    edgeRetinalAngleDeg: model.maxRetinalAngle * RAD,
+    kRatio,                            // 1 附近 = 盘-斑标定与 fov 自洽
+    calibrationMethod: model.calibration.method
   };
 }
 
