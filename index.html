@@ -518,9 +518,15 @@
           </div>
 
           <div class="control-group">
-            <label>赤道横径 <span style="color: #666; font-size: 0.75rem;">可选, 巩膜外表面 s-s</span></label>
-            <input type="number" id="equatorial-diameter" value="" step="0.1" min="18" max="30"
-                   placeholder="留空则按回归 (约 24.2)">
+            <label>赤道横径 <span style="color: #666; font-size: 0.75rem;">可选, 留空按回归</span></label>
+            <div class="control-row">
+              <input type="number" id="equatorial-diameter" value="" step="0.1" min="18" max="30"
+                     placeholder="如 22.9 或 24.2">
+              <select id="equatorial-surface">
+                <option value="external">外表面 s-s (≈24.2)</option>
+                <option value="internal">内表面 r-r (≈22.9)</option>
+              </select>
+            </div>
           </div>
           
           <div class="control-group">

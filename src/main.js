@@ -31,6 +31,7 @@ const infoPanel = document.getElementById('info-panel');
 const axialLengthInput = document.getElementById('axial-length');
 const corneaDiameterInput = document.getElementById('cornea-diameter');
 const equatorialDiameterInput = document.getElementById('equatorial-diameter');
+const equatorialSurfaceSelect = document.getElementById('equatorial-surface');
 const corneaKValueInput = document.getElementById('cornea-k-value');
 const corneaDValueInput = document.getElementById('cornea-d-value');
 const fovInput = document.getElementById('fov');
@@ -52,10 +53,15 @@ function getCorneaDiameter() {
   return isNaN(value) ? 11.7 : value;
 }
 
-/** 实测赤道横径 (巩膜外表面), 留空返回 null 走群体回归 */
+/** 实测赤道横径, 留空返回 null 走群体回归 */
 function getEquatorialDiameter() {
   const value = parseFloat(equatorialDiameterInput.value);
   return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** 直径口径: 'external' (巩膜外表面 s-s) | 'internal' (视网膜面 r-r) */
+function getEquatorialDiameterSurface() {
+  return equatorialSurfaceSelect.value === 'internal' ? 'internal' : 'external';
 }
 
 function getCorneaKValue() {
@@ -102,6 +108,7 @@ function setupEventListeners() {
   axialLengthInput.addEventListener('change', updateInfo);
   corneaDiameterInput.addEventListener('change', updateInfo);
 equatorialDiameterInput.addEventListener('change', updateInfo);
+equatorialSurfaceSelect.addEventListener('change', updateInfo);
   corneaKValueInput.addEventListener('input', () => {
     if (corneaKValueInput.value) {
       corneaDValueInput.value = '';
@@ -210,6 +217,7 @@ function getGeometryOptions() {
     corneaDiameter: getCorneaDiameter(),
     corneaKValue: getCorneaKValue(),
     equatorialDiameter: getEquatorialDiameter(),
+    equatorialDiameterSurface: getEquatorialDiameterSurface(),
     fov: parseFloat(fovInput.value) || 200,
     projection: projectionSelect.value
   };
@@ -304,7 +312,8 @@ function updateHoleInfo() {
     axialLength,
     corneaDiameter,
     corneaKValue,
-    { phiDeg: breakResult.phiDeg, eyeSide, equatorialDiameter }
+    { phiDeg: breakResult.phiDeg, eyeSide, equatorialDiameter,
+      equatorialDiameterSurface: geo.equatorialDiameterSurface }
   );
 
   const clockPosition = getClockHourPosition(breakResult.phi);
@@ -450,18 +459,22 @@ function updateInfo() {
     corneaDiameter: geo.corneaDiameter,
     corneaKValue: geo.corneaKValue,
     projection: geo.projection,
-    equatorialDiameter: geo.equatorialDiameter
+    equatorialDiameter: geo.equatorialDiameter,
+    equatorialDiameterSurface: geo.equatorialDiameterSurface
   });
   const eyeGeometry = calculateEyeGeometry(
     geo.axialLength, geo.corneaDiameter, geo.corneaKValue,
-    { equatorialDiameter: geo.equatorialDiameter }
+    { equatorialDiameter: geo.equatorialDiameter,
+      equatorialDiameterSurface: geo.equatorialDiameterSurface }
   );
 
   // 后部视网膜为扁椭球 (Atchison 2005): 赤道半轴大, 前后半轴小。
   // 不再显示单一「球半径」—— 那个数会把前后径与横径绑死 (赤道跟着眼轴涨)。
   const eq = eyeGeometry.equatorialRadius;
   const ax = eyeGeometry.semiAxes.axial;
-  const sourceNote = eyeGeometry.semiAxesSource === 'measured' ? ' 实测赤道' : '';
+  const sourceNote = eyeGeometry.semiAxesSource === 'measured'
+    ? ` 实测${eyeGeometry.semiAxes.equatorialDiameterSurface === 'internal' ? '内' : '外'}表面`
+    : '';
   document.getElementById('retina-radius').textContent =
     `${eq.horizontal.toFixed(2)} × ${eq.vertical.toFixed(2)} × ${ax.toFixed(2)} mm` +
     sourceNote +
