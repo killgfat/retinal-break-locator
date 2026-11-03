@@ -3,6 +3,7 @@ import { calculateEyeGeometry, createProjectionModel, meridianSemiAxis } from '.
 import { createEyeballGeometry, createRetinalSphereGeometry } from '../visualize.js';
 
 const RAD = 180 / Math.PI;
+const segmentsLon = 96;   // 与 createEyeballGeometry 一致
 
 describe('createEyeballGeometry (三段式轮廓)', () => {
   it('places the posterior pole at (0, 0, -c) and the equator at the semi-axes', () => {
@@ -119,6 +120,38 @@ describe('createEyeballGeometry (三段式轮廓)', () => {
         }
       }
       expect(apexCount).toBeGreaterThan(20);
+
+      geo.dispose();
+    }
+  });
+
+  it('the anterior segment meets the cornea without a step at every meridian', () => {
+    // 回归: 前段曾用球面 (半径 = 该子午线赤道半轴)。三轴椭球 aV > aH 时
+    // (AL=30 纵向 aV=12.89), 球面到角膜缘 radial = 6.19, 而角膜固定 5.85,
+    // 纵向出现 0.34mm 径向 + 0.62mm 轴向的台阶。
+    // 现在前段是两端锚定的过渡面, 任何子午线都必须精确落在 (WTW/2, zLimbus)。
+    for (const al of [20, 24, 26, 28, 30]) {
+      const g = calculateEyeGeometry(al);
+      const geo = createEyeballGeometry(g);
+      const p = geo.attributes.position.array;
+      const half = g.corneaDiameter / 2;
+
+      const body = (72 + 1) * (96 + 1);
+      let bMinR = Infinity, bMaxR = -Infinity;
+      let bMinZ = Infinity, bMaxZ = -Infinity;
+
+      // 主体最后一圈 (lat = latLimbus)
+      for (let i = (body - segmentsLon - 1) * 3; i < body * 3; i += 3) {
+        const r = Math.hypot(p[i], p[i + 1]);
+        bMinR = Math.min(bMinR, r);
+        bMaxR = Math.max(bMaxR, r);
+        bMinZ = Math.min(bMinZ, p[i + 2]);
+        bMaxZ = Math.max(bMaxZ, p[i + 2]);
+      }
+
+      expect(bMaxR - bMinR).toBeLessThan(1e-4);
+      expect(bMaxZ - bMinZ).toBeLessThan(1e-4);
+      expect(bMinR).toBeCloseTo(half, 4);
 
       geo.dispose();
     }

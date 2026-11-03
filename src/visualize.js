@@ -158,12 +158,13 @@ export function createEyeballGeometry(eyeGeometry) {
   // 代价: 前段弧长随 AL 略变 (AL=30 时 13mm vs 测量链的 11.5mm), 仅影响线框外观。
   const latLimbus = Math.PI - Math.asin(Math.min(1, halfCornea / anteriorRadius));
   const limbusRingRadius = anteriorRadius * Math.sin(latLimbus);
-  // 角膜缘处的轴向坐标 (黄斑方向为正, 前方为负)
-  const axialLimbus = anteriorRadius * Math.cos(latLimbus);
+  // 角膜缘平面的轴向坐标 (前方为正)。所有子午线共用 —— 角膜缘是绕光轴的圆。
+  const zLimbus = -anteriorRadius * Math.cos(latLimbus);
   const corneaSag = corneaRadius - Math.sqrt(Math.max(0,
     corneaRadius * corneaRadius - Math.min(corneaRadius, limbusRingRadius) ** 2));
-  // 角膜顶点比角膜缘更靠前 ⇒ 更负
-  const corneaApex = axialLimbus - corneaSag;
+  // 角膜顶点: 比角膜缘再靠前一个矢高
+  const zApex = zLimbus + corneaSag;
+  const zCorneaCentre = zApex - corneaRadius;
 
   for (let lat = 0; lat <= segmentsLat; lat++) {
     const latAngle = (lat / segmentsLat) * latLimbus;
@@ -184,10 +185,18 @@ export function createEyeballGeometry(eyeGeometry) {
         radial = a * Math.sin(t);
         axial = c * Math.cos(t);
       } else {
-        // 前段用该子午线的赤道半轴, 保证在 lat=90° 处与椭球连续
-        // (横向 aH ≠ 纵向 aV, 若统一用 aH 会在纵向产生 0.08mm 跳变)
-        radial = a * Math.sin(latAngle);
-        axial = a * Math.cos(latAngle);
+        // --- 前段: 两端严格匹配的过渡面 ---
+        //
+        // 不能用球。该子午线的赤道半轴 a(λ) 在纵向可达 12.89 (AL=30),
+        // 球面走到角膜缘时 radial = a·sin(latLimbus) = 6.19, 而角膜固定
+        // WTW/2 = 5.85 —— 纵向径向差 0.34mm、轴向往里差 0.62mm, 就是视图上那圈台阶。
+        //
+        // 改为两端锚定的插值:
+        //   u=0 (赤道):   radial = a(λ),    axial = 0        ← 与椭球连续
+        //   u=1 (角膜缘): radial = WTW/2,   axial = -zLimbus ← 与角膜球冠对齐
+        const u = (latAngle - latEquator) / Math.max(1e-9, latLimbus - latEquator);
+        radial = halfCornea + (a - halfCornea) * Math.cos(u * Math.PI / 2);
+        axial = -zLimbus * Math.sin(u * Math.PI / 2);
       }
 
       vertices.push(radial * cosLon, radial * sinLon, -axial);
@@ -214,9 +223,6 @@ export function createEyeballGeometry(eyeGeometry) {
   // 球面半径 = K 值, 顶点在最前, 边缘正好落在角膜缘圈 (radial = WTW/2)。
   const segCorneaLat = 24;
   const latCorneaMax = Math.asin(Math.min(1, halfCornea / corneaRadius));
-  // 角膜顶点 z (前方为正), 球心在其后 Rc
-  const zApex = -axialLimbus + corneaSag;
-  const zCorneaCentre = zApex - corneaRadius;
   const corneaBase = vertices.length / 3;
 
   for (let i = 0; i <= segCorneaLat; i++) {
