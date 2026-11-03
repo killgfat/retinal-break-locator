@@ -675,28 +675,30 @@ function createLimbusArcLine(model, eyeSide) {
   // (与角膜缘环同一个角, 因此末端严格落在环上)。
   const g = currentEyeGeometry;
 
-  // 与线框 / 角膜缘环共用同一几何: 旋转对称椭圆 + limbusRing()
-  const aRef = g.equatorialRadius.horizontal;
-  const cRef = g.semiAxes.axial;
+  // 黄线必须贴着**纹理球面**走 —— 那才是用户看到的图像表面。
+  // 纹理面用三轴 surfacePoint (a 随方位变), 所以这里也要用该子午线的 a(φ)。
+  // 若改用旋转对称的 aH, 纵向会内缩 0.7mm (AL=30: aV=12.89 vs aH=12.18),
+  // 视觉上就是"线往里面翘"。
+  const phi = m.phi;
+  const aM = meridianSemiAxis(model.semiAxes, phi * 180 / Math.PI);
+  const cM = model.semiAxes.axial;
   const limbus = limbusRingGeometry(g);
 
   const thetaStart = m.theta;
-  const phi = m.phi;
-  if (!(limbus.theta > thetaStart + 1e-6)) return null;
-
   // 球心角 θ ↔ 参数角 t: tanθ = (c/a)·tan t
-  const thetaToParam = (th) => Math.atan2(aRef * Math.sin(th), cRef * Math.cos(th));
-  const tStart = thetaToParam(thetaStart);
-  const tEnd = limbus.paramAngle;
+  const tStart = Math.atan2(aM * Math.sin(thetaStart), cM * Math.cos(thetaStart));
+
+  // 终点: 该子午线上 radial 恰为环半径 (WTW/2) 的参数角
+  const tEnd = Math.PI - Math.asin(Math.min(1, limbus.radius / aM));
+  if (!(tEnd > tStart + 1e-6)) return null;
 
   const points = [];
   const segments = 64;
 
   for (let i = 0; i <= segments; i++) {
     const t = tStart + (i / segments) * (tEnd - tStart);
-    // 与 createEyeballGeometry 完全相同的椭圆参数式
-    const radial = aRef * Math.sin(t);
-    const axial = cRef * Math.cos(t);
+    const radial = aM * Math.sin(t);
+    const axial = cM * Math.cos(t);
 
     points.push(new THREE.Vector3(
       radial * Math.cos(phi),

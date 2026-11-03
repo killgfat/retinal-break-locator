@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { calculateEyeGeometry, createProjectionModel, meridianSemiAxis } from '../mapper.js';
+import {
+  calculateEyeGeometry, createProjectionModel, meridianSemiAxis, surfacePoint
+} from '../mapper.js';
 import {
   createEyeballGeometry, createRetinalSphereGeometry, limbusRingGeometry
 } from '../visualize.js';
@@ -306,6 +308,51 @@ describe('createEyeballGeometry (三段式轮廓)', () => {
     expect(rb - ra).toBeLessThan(1.0);   // 22→30mm 只差 <1mm
     a.dispose();
     b.dispose();
+  });
+});
+
+describe('裂孔→角膜缘黄线', () => {
+  // 黄线的中间段必须与纹理球面同半径 (同一 a(φ), c, 参数角)
+  it('trace the same meridional ellipse as the textured surface', () => {
+    for (const al of [24, 30]) {
+      const g = calculateEyeGeometry(al);
+      const model = createProjectionModel({ axialLength: al, fov: 200 });
+
+      for (const phiDeg of [0, 45, 90, 135]) {
+        const phi = phiDeg * Math.PI / 180;
+        const aM = meridianSemiAxis(model.semiAxes, phiDeg);
+        const cM = model.semiAxes.axial;
+
+        for (const thetaDeg of [20, 50, 80]) {
+          const theta = thetaDeg * Math.PI / 180;
+          // 纹理面
+          const sp = surfacePoint(theta, phi, model.semiAxes);
+          // 黄线 (参数角路径)
+          const t = Math.atan2(aM * Math.sin(theta), cM * Math.cos(theta));
+          const r = aM * Math.sin(t);
+          const z = cM * Math.cos(t);
+
+          expect(r).toBeCloseTo(sp.radial, 9);
+          expect(z).toBeCloseTo(sp.axial, 9);
+        }
+      }
+    }
+  });
+
+  it('ends on the limbus ring for every meridian', () => {
+    for (const al of [24, 30]) {
+      const g = calculateEyeGeometry(al);
+      const model = createProjectionModel({ axialLength: al, fov: 200 });
+      const L = limbusRingGeometry(g);
+
+      for (const phiDeg of [0, 45, 90, 135, 180]) {
+        const aM = meridianSemiAxis(model.semiAxes, phiDeg);
+        const tEnd = Math.PI - Math.asin(Math.min(1, L.radius / aM));
+        const r = aM * Math.sin(tEnd);
+        // 径向必须精确等于环半径
+        expect(r).toBeCloseTo(L.radius, 9);
+      }
+    }
   });
 });
 
