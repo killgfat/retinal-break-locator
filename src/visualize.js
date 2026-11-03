@@ -85,6 +85,18 @@ export function initVisualization() {
   animate();
 }
 
+/**
+ * 仅更新参考眼球 (线框 + 角膜缘环), 不动纹理
+ *
+ * 没有上传图像时改眼轴/角膜参数, 也必须让三维视图跟着变 ——
+ * 否则只有文字在变, 线框还是 24mm 的默认形状。
+ */
+export function updateReferenceGeometry(eyeGeometry) {
+  currentEyeGeometry = eyeGeometry;
+  createReferenceSphere(eyeGeometry);
+  createCornea(eyeGeometry);
+}
+
 function createReferenceSphere(eyeGeometry) {
   if (referenceSphere) {
     scene.remove(referenceSphere);

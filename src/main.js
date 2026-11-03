@@ -2,7 +2,9 @@
  * 眼底球面映射系统 - 主入口
  */
 
-import { initVisualization, updateTexture, dispose, setMarkers } from './visualize.js';
+import {
+  initVisualization, updateTexture, updateReferenceGeometry, dispose, setMarkers
+} from './visualize.js';
 import {
   calculateRetinalParameters,
   calculateMaculaFromDisc,
@@ -105,10 +107,14 @@ function setupEventListeners() {
   
   processBtn.addEventListener('click', processImage);
   
+  // input 而非只有 change: 拖 spinner 时线框也实时跟随
+  axialLengthInput.addEventListener('input', updateInfo);
   axialLengthInput.addEventListener('change', updateInfo);
+  corneaDiameterInput.addEventListener('input', updateInfo);
   corneaDiameterInput.addEventListener('change', updateInfo);
-equatorialDiameterInput.addEventListener('change', updateInfo);
-equatorialSurfaceSelect.addEventListener('change', updateInfo);
+  equatorialDiameterInput.addEventListener('input', updateInfo);
+  equatorialDiameterInput.addEventListener('change', updateInfo);
+  equatorialSurfaceSelect.addEventListener('change', updateInfo);
   corneaKValueInput.addEventListener('input', () => {
     if (corneaKValueInput.value) {
       corneaDValueInput.value = '';
@@ -482,6 +488,9 @@ function updateInfo() {
   // 等距球心角口径下中心与全场的像素尺度一致;覆盖比例为占视网膜 (以锯齿缘为界)
   document.getElementById('pixel-scale').textContent =
     `${params.mmPerPixelCenter.toFixed(4)} mm/px · 视网膜覆盖 ${(params.retinalCoverage * 100).toFixed(0)}%`;
+
+  // 没有图像时也要更新参考眼球: 否则改眼轴只有文字变、线框不动
+  updateReferenceGeometry(eyeGeometry);
 
   if (currentImage) {
     updateTexture(currentImage, getTextureOptions());
