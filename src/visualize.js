@@ -156,82 +156,41 @@ export function createEyeballGeometry(eyeGeometry) {
   //   - 前者在 AL≤22 时给出 radial 6.2 > 5.85, 角膜判据 radial≤WTW/2 整圈落空
   //   - 后者在 AL≥24 时同样落空 (赤道半轴越大, 同样的弧长对应更大纬圈)
   // 代价: 前段弧长随 AL 略变 (AL=30 时 13mm vs 测量链的 11.5mm), 仅影响线框外观。
-  const latLimbus = Math.PI - Math.asin(Math.min(1, halfCornea / anteriorRadius));
-  const limbusRingRadius = anteriorRadius * Math.sin(latLimbus);
-  // 角膜缘平面的轴向坐标 (前方为正)。所有子午线共用 —— 角膜缘是绕光轴的圆。
-  const zLimbus = -anteriorRadius * Math.cos(latLimbus);
+  // ⚠️ 参考眼球用**旋转对称**椭球 (a = aH, 忽略 aV/aH 的 0.7% 差异)。
+  //
+  // 三轴 + 圆形角膜缘在几何上无法同时满足: 各子午线的椭球等纬圈半径不同,
+  // 而角膜球冠必须是圆。强行用 latLimbus(球心角) 去截椭球参数式, 端点会
+  // 跑到球冠前面 (z 11.4 vs 10.7), 形成锥形。0.7% 的纵向差异在视觉上
+  // 完全看不出, 但能换来整条轮廓严格连续。测量链仍用三轴 (mapper)。
+  const aRef = semiAxes.horizontal;
+  const cRef = semiAxes.axial;
+
+  // 角膜缘对应**参数角** t: radial = a·sin(t) = WTW/2
+  const tLimbus = Math.PI - Math.asin(Math.min(1, halfCornea / aRef));
+  // 参数角 → 球心角 (切线转角): tanθ = (c/a)·tan t
+  const latLimbus = Math.atan2(cRef * Math.sin(tLimbus), aRef * Math.cos(tLimbus));
+  const limbusRingRadius = aRef * Math.sin(tLimbus);
+  const zLimbus = -cRef * Math.cos(tLimbus);
+
   const corneaSag = corneaRadius - Math.sqrt(Math.max(0,
     corneaRadius * corneaRadius - Math.min(corneaRadius, limbusRingRadius) ** 2));
-  // 角膜顶点: 比角膜缘再靠前一个矢高
   const zApex = zLimbus + corneaSag;
   const zCorneaCentre = zApex - corneaRadius;
 
   for (let lat = 0; lat <= segmentsLat; lat++) {
-    const latAngle = (lat / segmentsLat) * latLimbus;
+    // 用**参数角** tLimbus, 不是球心角 latLimbus —— 椭圆参数式吃的是参数角。
+    // 混用会让最后一圈只到 r=5.35 而不是 WTW/2=5.85, 留下 0.5mm 的缝。
+    const latAngle = (lat / segmentsLat) * tLimbus;
 
     for (let lon = 0; lon <= segmentsLon; lon++) {
       const lonAngle = (lon / segmentsLon) * 2 * Math.PI;
       const cosLon = Math.cos(lonAngle);
       const sinLon = Math.sin(lonAngle);
 
-      const a = meridianSemiAxis(semiAxes, lonAngle * 180 / Math.PI);
-      const c = semiAxes.axial;
-
-      let radial, axial;
-
-      if (latAngle <= latEquator) {
-        // 椭圆参数式: tan θ = (c/a)·tan t
-        const t = Math.atan2(a * Math.sin(latAngle), c * Math.cos(latAngle));
-        radial = a * Math.sin(t);
-        axial = c * Math.cos(t);
-      } else {
-        // --- 前段: 两端严格匹配的过渡面 ---
-        //
-        // 不能用球。该子午线的赤道半轴 a(λ) 在纵向可达 12.89 (AL=30),
-        // 球面走到角膜缘时 radial = a·sin(latLimbus) = 6.19, 而角膜固定
-        // WTW/2 = 5.85 —— 纵向径向差 0.34mm、轴向往里差 0.62mm, 就是视图上那圈台阶。
-        //
-        // 改为三次 Hermite: 位置 + **切线** 两端锚定。
-        //
-        // 只锚位置不够 —— 用 cos/sin 插值时终点切线是水平的 (dz/du=0),
-        // 而角膜球冠在边缘是斜着向后弯的 (dz/dr ≈ -1.13), 两者形成一个折角,
-        // 视觉上就是"凹进去一块"。
-        //
-        //   u=0 (赤道):   P=(a(λ), 0),       切线 = (0, +1)      ← 椭球在赤道处切向沿 z
-        //   u=1 (角膜缘): P=(WTW/2, zLimbus), 切线 = (-cosL, sinL) ← 与角膜球冠同切向
-        const u = (latAngle - latEquator) / Math.max(1e-9, latLimbus - latEquator);
-        const u2 = u * u;
-        const u3 = u2 * u;
-        const h00 = 2 * u3 - 3 * u2 + 1;
-        const h10 = u3 - 2 * u2 + u;
-        const h01 = -2 * u3 + 3 * u2;
-        const h11 = u3 - u2;
-
-        // 角膜球冠在边缘处的单位切向 (指向顶点: r 减小, z 增大)
-        const cosEdge = Math.sqrt(Math.max(0,
-          corneaRadius * corneaRadius - halfCornea * halfCornea)) / corneaRadius;
-        const sinEdge = halfCornea / corneaRadius;
-
-        const r0 = a;
-        const z0 = 0;
-        const r1 = halfCornea;
-        const z1 = zLimbus;
-        // 控制柄长度: 取两端距离的一半, 保证曲线不过冲
-        const handle = 0.5 * Math.hypot(r1 - r0, z1 - z0);
-
-        // Hermite 的 h10/h11 后面跟的是**导数向量** (dr/du, dz/du),
-        // 必须整个向量乘同一个长度。分别乘不同标量会让 m1 方向偏离,
-        // 末端切向反而更离谱 (曾算到 -1.82 vs 角膜 -1.13)。
-        const L = 0.35 * Math.hypot(r1 - r0, z1 - z0);
-        const m0r = 0;
-        const m0z = L;              // 赤道: 切向沿 +z
-        const m1r = -cosEdge * L;   // 角膜缘: 指向顶点 (r 减小)
-        const m1z = sinEdge * L;    //           (z 增大)
-
-        radial = h00 * r0 + h10 * m0r + h01 * r1 + h11 * m1r;
-        const zCurve = h00 * z0 + h10 * m0z + h01 * z1 + h11 * m1z;
-        axial = -zCurve;
-      }
+      // latAngle 是**参数角 t** (与 tLimbus 同口径), 直接代入椭圆。
+      // 后极 lat=0 → (0, -c); 角膜缘 lat=tLimbus → (WTW/2, zLimbus)。
+      const radial = aRef * Math.sin(latAngle);
+      const axial = cRef * Math.cos(latAngle);
 
       vertices.push(radial * cosLon, radial * sinLon, -axial);
     }

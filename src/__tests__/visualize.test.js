@@ -29,8 +29,10 @@ describe('createEyeballGeometry (三段式轮廓)', () => {
       if (y > maxY) maxY = y;
     }
     // 72 段离散化: 赤道落在格点之间, 误差 ~1e-3 mm
+    // 参考眼球用旋转对称椭球 (a = aH), 纵向也取 aH —— 三轴 + 圆形角膜缘
+    // 无法同时满足, 0.7% 的纵向差异在视觉上不可见。测量链仍用三轴。
     expect(maxX).toBeCloseTo(g.equatorialRadius.horizontal, 2);
-    expect(maxY).toBeCloseTo(g.equatorialRadius.vertical, 2);
+    expect(maxY).toBeCloseTo(g.equatorialRadius.horizontal, 2);
     // 赤道处前后轴分量接近 0
     expect(Math.abs(zAtMaxX)).toBeLessThan(0.15);
 
@@ -157,10 +159,9 @@ describe('createEyeballGeometry (三段式轮廓)', () => {
     }
   });
 
-  it('the anterior transition matches the corneal tangent at the limbus', () => {
-    // 回归: 只用 cos/sin 插值时终点切线是水平的 (dz/du=0), 与角膜球冠
-    // 在边缘的斜切向 (dz/dr ≈ -1.13) 撞出折角 —— 视觉上像凹进去一块。
-    // 现在用 Hermite, 两端导数分别锚定椭球赤道切向与角膜边缘切向。
+  it('the whole globe profile is one smooth ellipse (no kinks)', () => {
+    // 回归: 前段曾用球 / Hermite / smoothstep 拼接, 都在接缝处或末端留下
+    // 折角、锥形或曲率突变。现在轮廓是单一椭圆, 曲率应连续变化。
     for (const al of [24, 30]) {
       const g = calculateEyeGeometry(al);
       const geo = createEyeballGeometry(g);
@@ -168,26 +169,38 @@ describe('createEyeballGeometry (三段式轮廓)', () => {
 
       const segLat = 72;
       const segLon = 96;
-      const last = segLat;
-      const prev = segLat - 1;
+      const pts = [];
+      for (let lat = 0; lat <= segLat; lat++) {
+        const i = (lat * (segLon + 1)) * 3;
+        pts.push([p[i], p[i + 2]]);
+      }
 
-      // lon = 0 子午线, 最后两点
-      const i1 = (last * (segLon + 1)) * 3;
-      const i0 = (prev * (segLon + 1)) * 3;
+      // 弦长应大致均匀 (参数角均匀采样)
+      const lens = [];
+      for (let i = 1; i < pts.length; i++) {
+        lens.push(Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+      }
+      const mn = Math.min(...lens);
+      const mx = Math.max(...lens);
+      expect(mx / mn).toBeLessThan(1.3);
 
-      const r1 = Math.hypot(p[i1], p[i1 + 1]);
-      const r0 = Math.hypot(p[i0], p[i0 + 1]);
-      const z1 = p[i1 + 2];
-      const z0 = p[i0 + 2];
-      const slope = (z1 - z0) / (r1 - r0);
-
-      // 角膜球冠在边缘的解析切线: dz/dr = -halfWtw / sqrt(Rc² - halfWtw²)
-      const half = g.corneaDiameter / 2;
-      const target = -half / Math.sqrt(g.corneaRadius ** 2 - half ** 2);
-
-      // 离散误差 (< 1°), 但必须同号且接近
-      expect(slope).toBeLessThan(-0.8);
-      expect(Math.abs(slope - target)).toBeLessThan(0.1);
+      // 曲率 (二阶差分) 相邻跳变应很小
+      const rhos = [];
+      for (let i = 1; i < pts.length - 1; i++) {
+        const [r0, z0] = pts[i - 1];
+        const [r1, z1] = pts[i];
+        const [r2, z2] = pts[i + 1];
+        const ar = r1 - r0, az = z1 - z0;
+        const br = r2 - r1, bz = z2 - z1;
+        const cross = Math.abs(ar * bz - az * br);
+        const len = Math.pow(ar * ar + az * az, 1.5);
+        if (cross > 1e-12) rhos.push(len / cross);
+      }
+      let maxJump = 0;
+      for (let i = 1; i < rhos.length; i++) {
+        maxJump = Math.max(maxJump, Math.abs(rhos[i] - rhos[i - 1]) / rhos[i - 1]);
+      }
+      expect(maxJump).toBeLessThan(0.05);
 
       geo.dispose();
     }
