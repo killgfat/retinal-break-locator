@@ -86,6 +86,36 @@ export function initVisualization() {
 }
 
 /**
+ * 角膜缘几何 —— 唯一来源
+ *
+ * createEyeballGeometry / createCornea / createLimbusArcLine 都必须用它,
+ * 否则线框、角膜缘环、黄线终点会各算一套, 彼此错位 (之前 ring 就落在旧位置)。
+ *
+ * 参考眼球是旋转对称椭圆 (a = aH, c = axial), 角膜缘对应参数角 t:
+ *   radial = a·sin(t) = WTW/2
+ *
+ * @param {Object} eyeGeometry - calculateEyeGeometry() 的返回值
+ * @returns {Object} { paramAngle, theta, radius, z, axial }
+ */
+export function limbusRingGeometry(eyeGeometry) {
+  const a = eyeGeometry.equatorialRadius.horizontal;
+  const c = eyeGeometry.semiAxes.axial;
+  const half = eyeGeometry.corneaDiameter / 2;
+
+  const paramAngle = Math.PI - Math.asin(Math.min(1, half / a));
+  const radius = a * Math.sin(paramAngle);
+  const axial = c * Math.cos(paramAngle);
+
+  return {
+    paramAngle,                                        // 椭圆参数角 t
+    theta: Math.atan2(c * Math.sin(paramAngle), a * Math.cos(paramAngle)), // 球心角
+    radius,                                            // = WTW/2
+    z: -axial,                                         // 前方为正
+    axial
+  };
+}
+
+/**
  * 仅更新参考眼球 (线框 + 角膜缘环), 不动纹理
  *
  * 没有上传图像时改眼轴/角膜参数, 也必须让三维视图跟着变 ——
@@ -165,12 +195,12 @@ export function createEyeballGeometry(eyeGeometry) {
   const aRef = semiAxes.horizontal;
   const cRef = semiAxes.axial;
 
-  // 角膜缘对应**参数角** t: radial = a·sin(t) = WTW/2
-  const tLimbus = Math.PI - Math.asin(Math.min(1, halfCornea / aRef));
-  // 参数角 → 球心角 (切线转角): tanθ = (c/a)·tan t
-  const latLimbus = Math.atan2(cRef * Math.sin(tLimbus), aRef * Math.cos(tLimbus));
-  const limbusRingRadius = aRef * Math.sin(tLimbus);
-  const zLimbus = -cRef * Math.cos(tLimbus);
+  // 角膜缘几何: 与 createCornea / 黄线共用同一来源
+  const limbus = limbusRingGeometry(eyeGeometry);
+  const tLimbus = limbus.paramAngle;
+  const latLimbus = limbus.theta;
+  const limbusRingRadius = limbus.radius;
+  const zLimbus = limbus.z;
 
   const corneaSag = corneaRadius - Math.sqrt(Math.max(0,
     corneaRadius * corneaRadius - Math.min(corneaRadius, limbusRingRadius) ** 2));
@@ -263,14 +293,10 @@ function createCornea(eyeGeometry) {
     limbusRing = null;
   }
   
-  const { anteriorRadius, corneaDiameter } = eyeGeometry;
-  const halfCorneaDiameter = corneaDiameter / 2;
-
-  // 角膜缘圈: 前段球上极角 limbusPolarAngle 处的纬圈 (与角膜直径自洽)
-  const latLimbus = eyeGeometry.limbusPolarAngle;
-  const limbusRingRadius = Math.min(halfCorneaDiameter,
-    anteriorRadius * Math.sin(latLimbus));
-  const zAtLimbus = -anteriorRadius * Math.cos(latLimbus);
+  // 角膜缘圈的位置/半径必须与线框末端一致 —— 共用 limbusRingGeometry()
+  const limbus = limbusRingGeometry(eyeGeometry);
+  const limbusRingRadius = limbus.radius;
+  const zAtLimbus = limbus.z;
 
   const ringGeometry = new THREE.TorusGeometry(limbusRingRadius, 0.08, 16, 64);
   const ringMaterial = new THREE.MeshBasicMaterial({
@@ -648,34 +674,29 @@ function createLimbusArcLine(model, eyeSide) {
   // 现在全程用黄斑系: 起点 = 裂孔的 m.theta, 终点 = latLimbus
   // (与角膜缘环同一个角, 因此末端严格落在环上)。
   const g = currentEyeGeometry;
-  const halfWtw = g.corneaDiameter / 2;
-  const latLimbus = Math.PI - Math.asin(Math.min(1, halfWtw / g.anteriorRadius));
+
+  // 与线框 / 角膜缘环共用同一几何: 旋转对称椭圆 + limbusRing()
+  const aRef = g.equatorialRadius.horizontal;
+  const cRef = g.semiAxes.axial;
+  const limbus = limbusRingGeometry(g);
 
   const thetaStart = m.theta;
   const phi = m.phi;
-  if (!(latLimbus > thetaStart + 1e-6)) return null;
+  if (!(limbus.theta > thetaStart + 1e-6)) return null;
 
-  const aMeridian = meridianSemiAxis(model.semiAxes, phi * 180 / Math.PI);
-  const cAxial = model.semiAxes.axial;
+  // 球心角 θ ↔ 参数角 t: tanθ = (c/a)·tan t
+  const thetaToParam = (th) => Math.atan2(aRef * Math.sin(th), cRef * Math.cos(th));
+  const tStart = thetaToParam(thetaStart);
+  const tEnd = limbus.paramAngle;
 
   const points = [];
   const segments = 64;
 
   for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const theta = thetaStart + t * (latLimbus - thetaStart);
-
-    let radial, axial;
-    if (theta <= Math.PI / 2) {
-      // 后段: 椭球面
-      const sp = surfacePoint(theta, phi, model.semiAxes);
-      radial = sp.radial;
-      axial = sp.axial;
-    } else {
-      // 前段: 球 (半径取该子午线的赤道半轴), 与 createEyeballGeometry 一致
-      radial = aMeridian * Math.sin(theta);
-      axial = aMeridian * Math.cos(theta);
-    }
+    const t = tStart + (i / segments) * (tEnd - tStart);
+    // 与 createEyeballGeometry 完全相同的椭圆参数式
+    const radial = aRef * Math.sin(t);
+    const axial = cRef * Math.cos(t);
 
     points.push(new THREE.Vector3(
       radial * Math.cos(phi),
@@ -684,15 +705,14 @@ function createLimbusArcLine(model, eyeSide) {
     ));
   }
 
-  // 末端强制落在角膜缘环上: 消除离散/近似造成的亚毫米缝隙
+  // 末端精确落到环上 (参数角一致时理论上已重合, 这里只吸收浮点误差)
   if (points.length) {
     const last = points[points.length - 1];
     const rLen = Math.hypot(last.x, last.y) || 1;
-    const zLimbus = -g.anteriorRadius * Math.cos(latLimbus);
     points[points.length - 1] = new THREE.Vector3(
-      halfWtw * last.x / rLen,
-      halfWtw * last.y / rLen,
-      zLimbus
+      limbus.radius * last.x / rLen,
+      limbus.radius * last.y / rLen,
+      limbus.z
     );
   }
 

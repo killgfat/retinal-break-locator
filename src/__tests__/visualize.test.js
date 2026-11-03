@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { calculateEyeGeometry, createProjectionModel, meridianSemiAxis } from '../mapper.js';
-import { createEyeballGeometry, createRetinalSphereGeometry } from '../visualize.js';
+import {
+  createEyeballGeometry, createRetinalSphereGeometry, limbusRingGeometry
+} from '../visualize.js';
 
 const RAD = 180 / Math.PI;
 const segmentsLon = 96;   // 与 createEyeballGeometry 一致
@@ -201,6 +203,42 @@ describe('createEyeballGeometry (三段式轮廓)', () => {
         maxJump = Math.max(maxJump, Math.abs(rhos[i] - rhos[i - 1]) / rhos[i - 1]);
       }
       expect(maxJump).toBeLessThan(0.05);
+
+      geo.dispose();
+    }
+  });
+
+  it('the limbus ring shares one source with the wireframe and the cornea', () => {
+    // 回归: createCornea / createLimbusArcLine 曾各自用 limbusPolarAngle 计算,
+    // 与线框的新几何脱节, 环停在旧位置。现在统一走 limbusRingGeometry()。
+    for (const al of [20, 24, 26, 30]) {
+      const g = calculateEyeGeometry(al);
+      const L = limbusRingGeometry(g);
+      const geo = createEyeballGeometry(g);
+      const p = geo.attributes.position.array;
+
+      const segLat = 72, segLon = 96;
+      const body = (segLat + 1) * (segLon + 1);
+
+      let bMax = -Infinity, bzMax = -Infinity;
+      for (let i = (body - segLon - 1) * 3; i < body * 3; i += 3) {
+        bMax = Math.max(bMax, Math.hypot(p[i], p[i + 1]));
+        bzMax = Math.max(bzMax, p[i + 2]);
+      }
+
+      expect(bMax).toBeCloseTo(L.radius, 5);
+      expect(bzMax).toBeCloseTo(L.z, 5);
+      expect(L.radius).toBeCloseTo(g.corneaDiameter / 2, 9);
+
+      // 球冠边缘也必须落在同一个圆上
+      let cMin = Infinity, cMax = -Infinity;
+      const half = g.corneaDiameter / 2;
+      for (let i = body * 3; i < p.length; i += 3) {
+        const r = Math.hypot(p[i], p[i + 1]);
+        if (Math.abs(r - half) < 1e-6) { cMin = Math.min(cMin, r); cMax = Math.max(cMax, r); }
+      }
+      expect(cMin).toBeCloseTo(L.radius, 5);
+      expect(cMax).toBeCloseTo(L.radius, 5);
 
       geo.dispose();
     }
