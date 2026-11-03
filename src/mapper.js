@@ -14,7 +14,9 @@
  *        与展示回算,不进入图像投影链。
  *
  *   θ_r  视网膜球心角 (retinal central angle)
- *        在眼球球心处张开的角。弧长 = R·θ_r,所以只有这个角能换算成 mm。
+ *        自后极起的**切线转角**(正圆时即圆心角)。扁椭球下弧长不再是 R·θ_r,
+ *        而是 meridianArcLength(θ_r, semiAxes, meridian) 的椭圆积分;
+ *        小角度极限 ds/dθ_r = a²/c (后极顶点曲率半径 12.9mm, 不是 11.48mm)。
  *        SLO 的"200° FOV"(Optos / ISWIG, Choudhry 2019)按此口径解释:
  *        标称视场边缘 (dist = 0.5) 处 θ_r = fov/2。
  *
@@ -38,7 +40,8 @@
  *        图像中心**不一定是黄斑** —— 固视偏差 / eye-steered 周边像时二者分离。
  *
  *   解剖原点 = 黄斑(中心凹) = 视轴落点。
- *        距离、子午线/钟点、角膜缘距离都以它为基准,全部为球面测地量。
+ *        距离、子午线/钟点、角膜缘距离都以它为基准;角度用球面测地量,
+ *        长度用椭球子午线弧长 (meridianArcLength)。
  *
  * 流程: 绕设备极点解投影 → 球面 3D 单位向量 → 在黄斑为极的坐标系里测量
  * (后者全是点积,见 createProjectionModel 的 toMaculaFrame,不必真的换坐标)。
@@ -47,8 +50,9 @@
  * 标定锚点
  * ============================================================================
  *
- * 标定使用盘-斑的**物理距离** 4.5mm: 求尺度 k 使盘-斑**测地距离**
- * R·acos(uM·uD) = 4.5mm(一维求根,不再有闭式解)。
+ * 标定使用盘-斑的**物理距离** 4.5mm: 求尺度 k 使盘-斑**球心角**等于
+ * meridianThetaFromArc(4.5, semiAxes, 盘-斑子午线)(一维求根,无闭式解)。
+ * 注意角度必须沿盘-斑所在子午线反解,各子午线赤道半轴相差约 0.7%。
  * 文献里的 17°/7.76°/18.7° 都是视角,直接当球心角用会带来约 20% 的系统偏差。
  *
  * ============================================================================
@@ -85,12 +89,33 @@ export const ANATOMY = {
   corneaThickness: 0.5,       // 角膜中央厚度 (mm), 约 0.5mm
 
   // --- 巩膜 ---
-  scleraThickness: 0.6,       // 巩膜代表厚度 (mm)。赤道 ~0.6, 肌止端后最薄 ~0.4, 后极 ~1.0。
+  scleraThickness: 0.6,       // 巩膜代表厚度 (mm)。赤道 ~0.42, 肌止端后最薄 ~0.3, 后极 ~1.0。
                               // 用于把视网膜内表面弧长换算为术中卡尺测量的外表面弧长。
+
+  // --- 前段几何 (角膜缘 → 赤道) ---
+  limbusToEquatorArc: 11.5,   // 解剖弧长 (mm)。文献 9-12 (另有 13-14 的口径, 差在是否沿表面量)。
+                              // 赤道直径几乎不随眼轴/屈光度变化 (Bekerman 2014 CT), 故此值按常数处理,
+                              // 不能由「角膜缘圆 + 后极」的球反推 —— 那样会随眼轴膨胀 0.46 mm/mm。
 
   // --- 视网膜范围 ---
   serrataPolarAngleDeg: 117,  // 锯齿缘距后极的球心角 (度, 24mm 眼约值), 占球面约 72.7%。
                               // 用作「视场占视网膜比例」的分母 (Optos 82% 口径即视网膜比例)。
+
+  // --- 后部视网膜椭球 (Atchison 2005, IOVS, PMID 16043841, MRI, 87 眼) ---
+  // 视网膜为**扁椭球 (oblate)**:赤道半轴 > 前后半轴。半轴随近视度数 M (D) 线性增长:
+  //   aH = 11.455 + 0.043M   (横向, 增速最慢)
+  //   aV = 11.365 + 0.090M   (纵向)
+  //   c  = 10.148 + 0.163M   (前后, 与眼轴几乎 1:1)
+  // 注意:赤道几乎不随眼轴膨胀 (0.043 mm/D ≈ 0.12 mm/mm AL),而前后半轴跟随 (≈0.45 mm/mm)。
+  // 单球模型把二者绑死,是周边弧长误差的主因。仅拟合到 -12D,更高度数属外推。
+  retinalEllipsoid: {
+    horizontal: { mean: 11.455, perDiopter: 0.043 },
+    vertical:   { mean: 11.365, perDiopter: 0.090 },
+    axial:      { mean: 10.148, perDiopter: 0.163 },
+    emmetropicAxialLength: 23.9, // 回归截距对应的眼轴 (正视眼均值)
+    mmPerDiopter: 0.36,          // 屈光度 ↔ 眼轴的群体平均换算 (仅用于缺省时的粗估)
+    fittedToDiopters: 12         // 回归覆盖范围; 超过此值半轴为外推
+  },
 
   // 视盘大小 (变异大，仅供参考)
   discHorizontalDiameter: 1.79, // mm, 范围 0.91-2.76
@@ -198,22 +223,181 @@ export function retinalToFieldAngle(thetaR, R, d) {
 }
 
 /**
+ * 第二类不完全椭圆积分 E(φ | m) = ∫₀^φ √(1 − m·sin²t) dt
+ *
+ * 用于椭球子午线弧长。Simpson 复合公式, n=48 时相对误差 < 1e-8。
+ * m < 0 (长椭球, 高度近视外推) 同样有效。
+ *
+ * @param {number} phi - 参数角上限 (弧度)
+ * @param {number} m - 椭圆模数 m = 1 − (c/a)²
+ * @returns {number}
+ */
+function ellipticE(phi, m) {
+  if (phi === 0) return 0;
+  const n = 48;
+  const h = phi / n;
+  let sum = 0;
+  for (let i = 0; i <= n; i++) {
+    const t = i * h;
+    const s = Math.sin(t);
+    const f = Math.sqrt(Math.max(0, 1 - m * s * s));
+    sum += i === 0 || i === n ? f : (i % 2 ? 4 * f : 2 * f);
+  }
+  return (sum * h) / 3;
+}
+
+/**
+ * 由眼轴粗估球镜度数 (仅供参考; 个体可差 ±2D 以上)
+ * @param {number} axialLength
+ * @returns {number} 球镜等效度数 M (D), 近视取正值
+ */
+export function refractionFromAxialLength(axialLength) {
+  const e = ANATOMY.retinalEllipsoid;
+  return (axialLength - e.emmetropicAxialLength) / e.mmPerDiopter;
+}
+
+/**
+ * 后部视网膜椭球半轴
+ *
+ * @param {number} axialLength - 眼轴 (mm)
+ * @param {number|null} sphericalEquivalent - 球镜度数 M (D, 近视取正); 省略则按眼轴粗估
+ * @returns {Object} { horizontal, vertical, axial, sphericalEquivalent, source, extrapolated }
+ */
+export function retinalSemiAxes(axialLength, sphericalEquivalent = null) {
+  const e = ANATOMY.retinalEllipsoid;
+  const M = Number.isFinite(sphericalEquivalent)
+    ? sphericalEquivalent
+    : refractionFromAxialLength(axialLength);
+
+  return {
+    horizontal: e.horizontal.mean + e.horizontal.perDiopter * M,
+    vertical: e.vertical.mean + e.vertical.perDiopter * M,
+    axial: e.axial.mean + e.axial.perDiopter * M,
+    sphericalEquivalent: M,
+    source: Number.isFinite(sphericalEquivalent) ? 'refraction' : 'axial',
+    extrapolated: M > e.fittedToDiopters
+  };
+}
+
+/**
+ * 指定子午线方向的赤道半轴
+ *
+ * 椭球 (x/aH)² + (y/aV)² + (z/c)² = 1 与过 z 轴的平面相交, 得半椭圆。
+ * 子午线方向 λ (0 = 图像右/横向, 90° = 图像上/纵向) 处的赤道半轴:
+ *   a(λ) = aH·aV / √(aV²cos²λ + aH²sin²λ)
+ *
+ * @param {Object} semiAxes - retinalSemiAxes() 的返回值
+ * @param {number} meridianDeg - 子午线方位角 (度)
+ * @returns {number}
+ */
+export function meridianSemiAxis(semiAxes, meridianDeg = 0) {
+  const l = meridianDeg * DEG;
+  const cos = Math.cos(l);
+  const sin = Math.sin(l);
+  const { horizontal: aH, vertical: aV } = semiAxes;
+  return (aH * aV) / Math.sqrt(aV * aV * cos * cos + aH * aH * sin * sin);
+}
+
+/**
+ * 球心角 θ → 椭球参数角 t
+ *
+ * 本模块把「球心角」定义为**切线转角**(圆时即圆心角),这样
+ *   lim_{θ→0} ds/dθ = a²/c = 后极顶点曲率半径
+ * 与临床「后极每度 ≈ 0.23mm」一致。若直接用参数角 t 当角度, 首度只有 0.20mm,
+ * 会与球心角口径不符。
+ *
+ * 关系: tan θ = (c/a)·tan t  ⇒  t = atan2(a·sinθ, c·cosθ)
+ */
+function thetaToParam(theta, a, c) {
+  return Math.atan2(a * Math.sin(theta), c * Math.cos(theta));
+}
+
+function paramToTheta(t, a, c) {
+  return Math.atan2(c * Math.sin(t), a * Math.cos(t));
+}
+
+/**
+ * 椭球子午线弧长: 自后极 (θ = 0) 量起
+ *
+ * s(θ) = a·E(t | m),  t = atan2(a·sinθ, c·cosθ),  m = 1 − (c/a)²
+ *
+ * @param {number} theta - 球心角 (弧度), 自后极量起
+ * @param {Object} semiAxes - retinalSemiAxes()
+ * @param {number} meridianDeg - 子午线方位角 (度)
+ * @returns {number} 弧长 (mm)
+ */
+export function meridianArcLength(theta, semiAxes, meridianDeg = 0) {
+  const a = meridianSemiAxis(semiAxes, meridianDeg);
+  const c = semiAxes.axial;
+  const t = thetaToParam(theta, a, c);
+  const m = 1 - (c * c) / (a * a);
+  return a * ellipticE(t, m);
+}
+
+/**
+ * meridianArcLength 的反函数: 弧长 → 球心角
+ * 牛顿迭代, 初值用后极曲率半径 a²/c (小角度下精确)。
+ *
+ * @param {number} arc - 自后极沿子午线的弧长 (mm)
+ * @param {Object} semiAxes - retinalSemiAxes()
+ * @param {number} meridianDeg - 子午线方位角 (度)
+ * @returns {number} 球心角 (弧度)
+ */
+export function meridianThetaFromArc(arc, semiAxes, meridianDeg = 0) {
+  if (!(arc > 0)) return 0;
+
+  const a = meridianSemiAxis(semiAxes, meridianDeg);
+  const c = semiAxes.axial;
+  const apexRadius = (a * a) / c;
+
+  let theta = Math.min(arc / apexRadius, Math.PI * 0.98);
+  for (let i = 0; i < 32; i++) {
+    // ds/dθ 就是该点的局部曲率半径。用**参数角** t 表示:
+    //   ρ(t) = (a²cos²t + c²sin²t)^{3/2} / (a·c)
+    // 端点校验: t=0 → a²/c (后极顶点), t=90° → c²/a (赤道)。
+    const t = thetaToParam(theta, a, c);
+    const st = Math.sin(t);
+    const ct = Math.cos(t);
+    const ds = Math.pow(a * a * ct * ct + c * c * st * st, 1.5) / (a * c);
+    const f = meridianArcLength(theta, semiAxes, meridianDeg) - arc;
+    const step = f / ds;
+    theta = clamp(theta - step, 0, Math.PI * 0.995);
+    if (Math.abs(step) < 1e-13) break;
+  }
+  return clamp(theta, 0, Math.PI);
+}
+
+/**
  * 计算眼球几何参数
  * 根据眼轴长度、角膜直径和角膜曲率计算眼球形状参数
  *
- * ⚠️ 模型限制: 这里把视网膜当作**正球面**。Atchison 2005 (PMID 16043841) MRI 实测
- * 显示正视眼视网膜实为**扁椭球 (oblate)**,近视加深时逐渐趋于正球(约 -7~-8D 时接近);
- * 且椭球中心相对中心凹鼻侧偏心 0.5mm、绕垂直轴倾斜 11°。
- * 因此本球模型对正视眼会**低估**周边弧长,对高度近视反而更接近。
+ * 几何分为两段 (三段式的后两段):
+ *   前段 角膜缘 → 赤道:  球面, 半径 retinalRadius (由角膜缘圆 + 后极拟合)
+ *   后段 赤道 → 后极:    **扁椭球**, 半轴见 ANATOMY.retinalEllipsoid (Atchison 2005 MRI)
+ *
+ * 为什么必须分开: 单球把前后径与横径绑死, 等价于假设眼球各向同性膨胀。
+ * MRI 实测赤道半轴只随眼轴涨 0.12 mm/mm, 而前后半轴涨 0.45 mm/mm —— 差 4 倍。
+ * 结果是单球在后极低估每度长度约 12%、赤道高估约 29%。
+ *
+ * ⚠️ 模型限制:
+ *  - 椭球仅拟合到 -12D, 更高属外推 (extrapolated 标记)
+ *  - 未建模椭球中心偏心 (鼻侧 0.5mm) 与绕垂直轴倾斜 (11°)
+ *  - 角膜与前部巩膜不在该椭球上, 前段仍用球 (见 TODO P2)
  *
  * @param {number} axialLength - 眼轴长度 (mm)
  * @param {number} corneaDiameter - 角膜直径 WTW (mm)
  * @param {number} corneaKValue - 角膜曲率半径 K值 (mm), 可选
  * @returns {Object} 眼球几何参数
  */
-export function calculateEyeGeometry(axialLength = 24, corneaDiameter = null, corneaKValue = null) {
+export function calculateEyeGeometry(
+  axialLength = 24,
+  corneaDiameter = null,
+  corneaKValue = null,
+  options = {}
+) {
   const wtw = corneaDiameter ?? ANATOMY.corneaDiameter;
   const kValue = corneaKValue ?? ANATOMY.corneaRadius;
+  const sphericalEquivalent = options.sphericalEquivalent ?? null;
 
   const corneaSag = calculateCorneaSag(wtw, kValue);
 
@@ -224,30 +408,78 @@ export function calculateEyeGeometry(axialLength = 24, corneaDiameter = null, co
   // 球心到角膜顶点的距离
   const sphereCenterFromCornea = axialLength - scleralRadius;
 
-  // 结点到球心的距离 d。夹到 [0, 0.95R] 以保证 fieldToRetinalAngle 的反正弦有解,
-  // 并避免异常生物测量参数(极短眼)导致结点落到球心后方。
+  // --- 后部视网膜椭球 (赤道 → 后极) ---
+  const semiAxes = retinalSemiAxes(axialLength, sphericalEquivalent);
+  // 前段 (角膜缘 → 赤道) 的半径取赤道半轴。赤道直径几乎不随眼轴变化
+  // (Bekerman 2014 CT: 横径与屈光度无关), 因此前段弧长也必须基本恒定。
+  // 若沿用「角膜缘圆 + 后极」拟合的球半径, 它会随眼轴一起膨胀
+  // (0.46 mm/mm), 使 30mm 眼的角膜缘→赤道算成 16mm —— 解剖上不存在。
+  const aH = semiAxes.horizontal;
+  const aV = semiAxes.vertical;
+  const c = semiAxes.axial;
+
+  // 结点到**后极曲率中心**的距离 d。
+  //
+  // 椭球在后极附近的局部曲率球半径 = apexRadius (a²/c), 其中心不是等效球心。
+  // 以椭球中心为原点、+z 朝前: 后极 z = −c, 曲率中心 z = −c + apexRadius,
+  // 角膜顶点 z = AL − c ⇒ 角膜顶点到曲率中心 = AL − apexRadius。
+  // 因此 d = AL − apexRadius − 结点距角膜顶点。
+  // 用等效球心会得到偏大约 1.4mm 的 d, 使回算视角偏低 1° 以上。
+  const apexRadiusForD = (aH * aH) / c;
   const nodalOffset = clamp(
-    sphereCenterFromCornea - ANATOMY.nodalPointFromCornea,
+    axialLength - apexRadiusForD - ANATOMY.nodalPointFromCornea,
     0,
-    scleralRadius * 0.95
+    apexRadiusForD * 0.95
   );
 
-  // 角膜缘相对后极(沿光轴)的球心角
+  // 后极顶点曲率半径 (横向子午线)。小角度下 ds/dθ = a²/c, 这是光学换算的尺度。
+  const apexRadius = apexRadiusForD;
+  // 赤道处曲率半径 (同一子午线), 决定赤道附近每度长度。
+  const equatorRadius = (c * c) / aH;
+
+  const anteriorRadius = semiAxes.horizontal;
+  void scleralRadius; // 保留：仅供兼容旧字段 retinalRadius (可视化球面网格)
+
+  // 角膜缘 → 赤道: 用解剖弧长, 而不是从后极球反推。
+  // 角膜缘圆 + 前部巩膜并不落在后极球上 (TODO P2), 用后极球会把两者绑死。
+  const limbusToEquatorArc = ANATOMY.limbusToEquatorArc;
+
+  // 角膜缘在**等效球**上的极角。仅用于可视化 (角膜缘环) 与 θ>锯齿缘 的退化分支;
+  // 前段实际弧长用 limbusToEquatorArc 常数, 不再由这个极角反推。
   const zAtLimbus = Math.sqrt(Math.max(0, scleralRadius * scleralRadius - halfWtw * halfWtw));
   const limbusPolarAngle = Math.acos(clamp(-zAtLimbus / scleralRadius, -1, 1));
 
-  // 角膜缘到后极(光轴极点)的弧长。注意:中心凹并不在光轴极点上,
-  // 相差 angle alpha ≈ 5°,该修正在 calculateLimbusDistance 中处理。
-  const limbusToPoleArc = scleralRadius * limbusPolarAngle;
+  // 后极 → 赤道 的椭球子午线弧长
+  const equatorArc = meridianArcLength(Math.PI / 2, semiAxes, 0);
+
+  // 角膜缘到后极(光轴极点)的弧长 = 前段球 + 后段椭球。
+  // 注意:中心凹并不在光轴极点上, 相差 angle alpha ≈ 5°, 该修正在 calculateLimbusDistance 中处理。
+  const limbusToPoleArc = limbusToEquatorArc + equatorArc;
 
   return {
     axialLength,
     corneaSag,
-    retinalRadius: scleralRadius,
+    retinalRadius: scleralRadius,   // 前段球半径 (视觉化 / 兼容旧名)
     sphereCenterFromCornea,
-    nodalOffset,                 // d
+    nodalOffset,                    // d
     nodalToRetina: scleralRadius + nodalOffset,
-    limbusPolarAngle,            // 弧度, 自后极量起
+
+    semiAxes,                       // {horizontal, vertical, axial}
+    anteriorRadius,                 // 前段球半径 (= 赤道半轴)
+    sphericalEquivalent: semiAxes.sphericalEquivalent,
+    semiAxesSource: semiAxes.source,      // 'refraction' | 'axial'
+    semiAxesExtrapolated: semiAxes.extrapolated,
+    apexRadius,                     // 后极顶点曲率半径 (a²/c)
+    equatorRadius,                  // 赤道处曲率半径 (c²/a)
+    equatorialRadius: {
+      horizontal: aH,
+      vertical: aV
+    },
+    limbusToEquatorArc,
+    equatorArc,                     // 赤道 → 后极
+    equatorPolarAngle: Math.PI / 2, // 分段接缝 (自后极量起)
+
+    limbusPolarAngle,               // 弧度, 自后极量起
     limbusToPoleArc,
     corneaDiameter: wtw,
     corneaRadius: kValue,
@@ -307,15 +539,23 @@ export function createProjectionModel(options = {}) {
     discToMaculaDistance = ANATOMY.discToMaculaDistance
   } = options;
 
-  const eyeGeometry = calculateEyeGeometry(axialLength, corneaDiameter, corneaKValue);
+  const eyeGeometry = calculateEyeGeometry(
+    axialLength,
+    corneaDiameter,
+    corneaKValue,
+    { sphericalEquivalent: options.sphericalEquivalent ?? null }
+  );
+  // R 用于 3D 坐标缩放 (需与 visualise 的球面网格一致), 保持前段球半径。
   const R = eyeGeometry.retinalRadius;
+  // 光学换算 (结点视角 ↔ 球心角) 用后极顶点曲率半径: 小角度下 ds/dθ = a²/c。
+  const opticalRadius = eyeGeometry.apexRadius;
   const d = eyeGeometry.nodalOffset;
   const law = getLaw(projection);
 
   // P1: fov 按球心角解释 —— 标称视场边缘 (dist = 0.5) 处 θ_r = fov/2。
   // maxFieldAngle 仅为展示/文献口径回算, 不进入投影链。
   const maxRetinalAngle = (fov / 2) * DEG;
-  const maxFieldAngle = retinalToFieldAngle(maxRetinalAngle, R, d);
+  const maxFieldAngle = retinalToFieldAngle(maxRetinalAngle, opticalRadius, d);
 
   /** 以尺度 kTry 把图像点反投影到扫描轴系单位向量 (极点 = 图像中心, +z) */
   function unprojectAt(kTry, x, y) {
@@ -353,9 +593,15 @@ export function createProjectionModel(options = {}) {
   const kFov = law.radius(maxRetinalAngle) / 0.5;
 
   if (hasDisc && discDist > 1e-6) {
-    // 物理锚点: 求根使盘-斑测地距离 R·acos(uM·uD) = 4.5mm。
-    // g(k) 随 k 单调增 (标注合理时), 用二分。
-    const target = discToMaculaDistance / R;
+    // 物理锚点: 求根使盘-斑**球心角** = 椭球弧长 4.5mm 对应的角。
+    // 角度必须沿盘-斑所在的子午线反解 (不同子午线赤道半轴差约 0.7%)。
+    // 图像方向与黄斑切平面方向在黄斑居中时严格一致, 偏心时误差 <1°, 对尺度影响可忽略。
+    const anchorMeridian = Math.atan2(-(discY - maculaY), (discX - maculaX) * imageAspect) * RAD;
+    const target = meridianThetaFromArc(
+      discToMaculaDistance,
+      eyeGeometry.semiAxes,
+      anchorMeridian
+    );
     const geodesicAt = (kTry) => {
       const uM = unprojectAt(kTry, maculaX, maculaY).u;
       const uD = unprojectAt(kTry, discX, discY).u;
@@ -381,8 +627,9 @@ export function createProjectionModel(options = {}) {
       calibration = {
         method: 'disc',
         discDist,
+        anchorMeridianDeg: anchorMeridian,
         discRetinalAngleDeg: target * RAD,
-        discFieldAngleDeg: retinalToFieldAngle(target, R, d) * RAD
+        discFieldAngleDeg: retinalToFieldAngle(target, opticalRadius, d) * RAD
       };
     } else {
       // 标注退化 (如盘-斑方位/距离无法夹住目标) → 回退 FOV
@@ -402,7 +649,7 @@ export function createProjectionModel(options = {}) {
 
   /** 归一化图像距离 → 视场角 (弧度)。仅展示/文献口径的回算值 */
   function fieldAngleAt(dist) {
-    return retinalToFieldAngle(retinalAngleAt(dist), R, d);
+    return retinalToFieldAngle(retinalAngleAt(dist), opticalRadius, d);
   }
 
   /** 视网膜球心角 → 归一化图像距离 */
@@ -462,7 +709,9 @@ export function createProjectionModel(options = {}) {
 
   return {
     eyeGeometry,
-    R,
+    R,                            // 3D 坐标缩放用的球半径
+    opticalRadius,                // 后极顶点曲率半径 (光学换算)
+    semiAxes: eyeGeometry.semiAxes,
     nodalOffset: d,
     projection: PROJECTION_LAWS[projection] ? projection : DEFAULT_PROJECTION,
     law,
@@ -500,21 +749,25 @@ export function calculateRetinalParameters(axialLength = 24, fov = 200, imageWid
   const model = createProjectionModel({ axialLength, fov, ...options });
   const retinalRadius = model.R;
 
-  // 全视场对应的视网膜弧长 = R·fov (球心角口径下不再有结点放大)
-  const retinalArc = retinalRadius * model.maxRetinalAngle * 2;
+  // 全视场对应的视网膜弧长 = 沿子午线 ±fov/2 的椭球弧长 (球心角口径, 无结点放大)
+  const halfArc = meridianArcLength(model.maxRetinalAngle, model.semiAxes, 0);
+  const retinalArc = halfArc * 2;
 
   const degPerPixel = fov / imageWidth;           // 视场度/像素
   const mmPerPixel = retinalArc / imageWidth;     // mm/像素 (全场平均值)
 
-  // 中心处的局部尺度。默认等距律 (ρ ∝ θ_r) 下全场恒定,与平均值相等;
-  // 其它律 (敏感性分析) 下中心与周边不同, 保留探测以反映该差异。
+  // 中心处的局部尺度。等距律下 mm/球心角 = 后极顶点曲率半径 (a²/c),
+  // 不再等于球半径 —— 这正是「每度长度沿子午线变化」的体现。
   const probe = 1e-4;
-  const mmPerNormalizedUnit = (retinalRadius * model.retinalAngleAt(probe)) / probe;
+  const mmPerNormalizedUnit =
+    (meridianArcLength(model.retinalAngleAt(probe), model.semiAxes, 0) / probe);
   const mmPerPixelCenter = mmPerNormalizedUnit / imageWidth;
 
   return {
     axialLength,
     retinalRadius,
+    opticalRadius: model.opticalRadius,
+    semiAxes: model.semiAxes,
     fov,
     imageWidth,
     degPerPixel,
@@ -523,7 +776,7 @@ export function calculateRetinalParameters(axialLength = 24, fov = 200, imageWid
     retinalArc,
     maxRetinalAngleDeg: model.maxRetinalAngle * RAD,
     retinalCoverage: model.retinalCoverage,
-    degPerMm: RAD / retinalRadius
+    degPerMm: RAD / model.opticalRadius
   };
 }
 
@@ -543,7 +796,7 @@ export function calculateRetinalParameters(axialLength = 24, fov = 200, imageWid
  */
 export function imageToSphere(x, y, axialLength = 24, fov = 200, options = {}) {
   const model = options.model || createProjectionModel({ axialLength, fov, ...options });
-  const R = model.R;
+  const R = model.R;   // 3D 坐标缩放 (与可视化球面一致)
 
   // 极点系 (图像中心) 位置
   const p = model.unproject(x, y);
@@ -555,10 +808,10 @@ export function imageToSphere(x, y, axialLength = 24, fov = 200, options = {}) {
   const phi = m.phi;
 
   // 视场角仅作展示回算
-  const fieldAngle = retinalToFieldAngle(theta, R, model.nodalOffset);
+  const fieldAngle = retinalToFieldAngle(theta, model.opticalRadius, model.nodalOffset);
 
   return {
-    theta,                      // 距黄斑的测地球心角 (弧度)
+    theta,                      // 距黄斑的球心角 (弧度)
     phi,                        // 黄斑切平面方位角 (弧度)
     fieldAngle,                 // 结点视角 (回算, 弧度)
     x: m.x,
@@ -568,7 +821,8 @@ export function imageToSphere(x, y, axialLength = 24, fov = 200, options = {}) {
     r: model.maxDist > 0 ? p.dist / model.maxDist : 0, // 相对视场边缘的比例
     angleDeg: theta * RAD,      // 球心角 (度)
     fieldAngleDeg: fieldAngle * RAD,
-    arcFromMaculaMm: R * theta,
+    // 球心角 → 弧长走椭球子午线积分 (不再用 R·θ)
+    arcFromMaculaMm: meridianArcLength(theta, model.semiAxes, phi * RAD),
     isValid: p.dist <= model.maxDist + 1e-9,
     u: p.u,                     // 扫描轴系单位向量
     poleTheta: p.theta,         // 极点系 (图像中心) 球心角
@@ -609,8 +863,9 @@ export function calculateMaculaFromDisc(
   const verticalAngle = ANATOMY.discToMaculaVertical;  // 视角, 下方
   const totalFieldAngle = Math.sqrt(horizontalAngle * horizontalAngle + verticalAngle * verticalAngle) * DEG;
 
-  // 文献视角 → 球心角 (结点换算仅用于此类文献数据) → 归一化图像距离
-  const totalCentralAngle = fieldToRetinalAngle(totalFieldAngle, model.R, model.nodalOffset);
+  // 文献视角 → 球心角 (结点换算仅用于此类文献数据) → 归一化图像距离。
+  // 结点换算的局部曲率尺度用后极顶点半径, 不用球半径。
+  const totalCentralAngle = fieldToRetinalAngle(totalFieldAngle, model.opticalRadius, model.nodalOffset);
   const dist = model.law.radius(totalCentralAngle) / model.scale;
 
   // 方向单位向量 (图像坐标系, y 向下)
@@ -798,12 +1053,16 @@ export function getTheoreticalDiscPosition(axialLength = 24, eyeSide = 'right') 
   const geometry = calculateEyeGeometry(axialLength);
   const R = geometry.retinalRadius;
 
-  // 球心角由物理距离决定
-  const theta = ANATOMY.discToMaculaDistance / R;
-
   // 方位: 鼻侧水平分量 + 上方垂直分量
   const nasalSign = eyeSide === 'right' ? 1 : -1; // 右眼鼻侧 = 图像右 = φ 0°
   const phi = Math.atan2(ANATOMY.discToMaculaVertical, nasalSign * ANATOMY.discToMaculaAngle);
+
+  // 球心角由**弧长**沿该子午线反解 (椭球), 而不是 4.5/R
+  const theta = meridianThetaFromArc(
+    ANATOMY.discToMaculaDistance,
+    geometry.semiAxes,
+    phi * RAD
+  );
 
   return {
     theta,
@@ -813,7 +1072,7 @@ export function getTheoreticalDiscPosition(axialLength = 24, eyeSide = 'right') 
     z: R * Math.cos(theta),
     eyeSide,
     angleFromMacula: theta * RAD,
-    fieldAngleFromMacula: retinalToFieldAngle(theta, R, geometry.nodalOffset) * RAD,
+    fieldAngleFromMacula: retinalToFieldAngle(theta, geometry.apexRadius, geometry.nodalOffset) * RAD,
     distanceFromMacula: ANATOMY.discToMaculaDistance
   };
 }
@@ -860,12 +1119,18 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
   const p = model.unproject(imageX, imageY);
   const m = model.toMaculaFrame(p.u);
 
-  const theta = m.theta;                              // 距黄斑测地球心角 (弧度)
+  const theta = m.theta;                              // 距黄斑球心角 (弧度)
   const phi = m.phi;                                 // 黄斑切平面方位角 (弧度)
-  const fieldAngle = retinalToFieldAngle(theta, model.R, model.nodalOffset); // 回算视角
+  const fieldAngle = retinalToFieldAngle(theta, model.opticalRadius, model.nodalOffset);
   const angleDeg = theta * RAD;
 
-  const distanceMm = model.R * theta;
+  // 球心角 → 弧长走椭球子午线积分 (不再用 R·θ)。
+  // 图像平面方向与黄斑切平面方位的差异很小 (黄斑居中时严格相同);
+  // 用它选子午线, 使 anchor 与输出沿同一子午线, 避免 0.7% 的椭圆各向异性偏差。
+  const anchorMeridianDeg = model.calibration.method === 'disc'
+    ? model.calibration.anchorMeridianDeg
+    : phi * RAD;
+  const distanceMm = meridianArcLength(theta, model.semiAxes, anchorMeridianDeg);
 
   // --- 不确定性传播 ---
   // 盘-斑锚点的群体变异 (4.0-5.0mm) 是 disc 模式下距离换算的主要误差源。
@@ -884,7 +1149,11 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
         discToMaculaDistance: dmm
       });
       const pp = mm.unproject(imageX, imageY);
-      return mm.R * mm.toMaculaFrame(pp.u).theta;
+      const fm = mm.toMaculaFrame(pp.u);
+      const mer = mm.calibration.method === 'disc'
+        ? mm.calibration.anchorMeridianDeg
+        : fm.phi * RAD;
+      return meridianArcLength(fm.theta, mm.semiAxes, mer);
     };
     distanceMmLow = evalAt(lo);
     distanceMmHigh = evalAt(hi);
@@ -903,6 +1172,7 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
     uncertaintySource,
     angleDeg,                          // 球心角 (度) —— 传给 calculateLimbusDistance 的就是它
     theta,
+    semiAxes: model.semiAxes,
     fieldAngle,
     fieldAngleDeg: fieldAngle * RAD,
     phi,
@@ -948,13 +1218,24 @@ export function calculateLimbusDistance(
   corneaKValue = null,
   options = {}
 ) {
-  const { phiDeg = null, eyeSide = 'right', angleAlpha = ANATOMY.angleAlpha } = options;
+  const {
+    phiDeg = null,
+    eyeSide = 'right',
+    angleAlpha = ANATOMY.angleAlpha,
+    sphericalEquivalent = null
+  } = options;
 
-  const eyeGeometry = calculateEyeGeometry(axialLength, corneaDiameter, corneaKValue);
+  const eyeGeometry = calculateEyeGeometry(
+    axialLength,
+    corneaDiameter,
+    corneaKValue,
+    { sphericalEquivalent }
+  );
 
-  const R = eyeGeometry.retinalRadius;
-  const theta = thetaDeg * DEG;
-  const arcToMaculaMm = R * theta;
+  const theta = clamp(thetaDeg, 0, 180) * DEG;
+  // 裂孔到黄斑 = 沿该子午线的椭球弧长
+  const meridianDeg = phiDeg ?? 0;
+  const arcToMaculaMm = meridianArcLength(theta, eyeGeometry.semiAxes, meridianDeg);
 
   // --- angle alpha 修正 (3D 向量形式, 黄斑基准系: 黄斑 = +z) ---
   let thetaFromOpticalAxis = theta;
@@ -985,18 +1266,62 @@ export function calculateLimbusDistance(
     alphaApplied = angleAlpha;
   }
 
-  // 角膜缘位于绕光轴的等纬圆上, 球心角为 limbusPolarAngle
-  const deltaTheta = eyeGeometry.limbusPolarAngle - thetaFromOpticalAxis;
+  // --- 分段弧长: 角膜缘 → 赤道 (前段球) + 赤道 → 裂孔 (后段椭球) ---
+  //
+  // 单球模型把前后径与横径绑死; 分段后两段各用适用范围内的几何,
+  // 在赤道 (θ = 90°) 衔接。赤道以外仍是椭球外推, 误差随 θ 增长。
+  const equator = Math.PI / 2;
+  const R = eyeGeometry.retinalRadius;
+  const semiAxes = eyeGeometry.semiAxes;
+  const meridian = meridianDeg;
 
-  const limbusToBreakMm = R * deltaTheta;
-  const limbusToBreakExternalMm = (R + eyeGeometry.scleraThickness) * deltaTheta;
+  // 视网膜范围: 后极 → 锯齿缘 (117°)。裂孔按定义应落在其中。
+  // 统一式: limbus→break = limbus→equator (前段球) + equator→break (椭球弧长差)
+  //   赤道以内 (θ<90°) 括号为正 → 加上; 赤道以外 (90-117°) 为负 → 减去。
+  // 90° 以外是椭球外推 (Atchison 仅拟合到赤道附近), 由 semiAxesExtrapolated 无关;
+  // 该段的绝对误差随 θ 增长, 需在 UI 上提示。
+  const serrata = ANATOMY.serrataPolarAngleDeg * DEG;
+
+  let limbusToBreakMm;
+  if (thetaFromOpticalAxis <= serrata) {
+    limbusToBreakMm = eyeGeometry.limbusToEquatorArc + eyeGeometry.equatorArc -
+      meridianArcLength(thetaFromOpticalAxis, semiAxes, meridian);
+  } else {
+    // 超出锯齿缘 (睫状体 / 角膜方向, 实际不会作为裂孔出现):
+    // 椭球不再适用, 退回前段球面近似, 避免给出无意义的外推值。
+    limbusToBreakMm = Math.max(0, R * (eyeGeometry.limbusPolarAngle - thetaFromOpticalAxis));
+  }
+
+  // 外表面: 前段球 + 巩膜厚度, 后段椭球各半轴 + 巩膜厚度。
+  const t = eyeGeometry.scleraThickness;
+  const semiAxesOuter = {
+    horizontal: semiAxes.horizontal + t,
+    vertical: semiAxes.vertical + t,
+    axial: semiAxes.axial + t
+  };
+  let limbusToBreakExternalMm;
+  if (thetaFromOpticalAxis <= serrata) {
+    const limbusToEquatorOuter = (R + t) * (eyeGeometry.limbusPolarAngle - equator);
+    const equatorArcOuter = meridianArcLength(equator, semiAxesOuter, meridian);
+    limbusToBreakExternalMm = limbusToEquatorOuter + equatorArcOuter -
+      meridianArcLength(thetaFromOpticalAxis, semiAxesOuter, meridian);
+  } else {
+    limbusToBreakExternalMm = Math.max(0, (R + t) * (eyeGeometry.limbusPolarAngle - thetaFromOpticalAxis));
+  }
 
   return {
     arcToMaculaMm,
     limbusToBreakMm,               // 视网膜内表面弧长
     limbusToBreakExternalMm,       // 巩膜外表面弧长 (术中卡尺对应值)
+    limbusToEquatorMm: eyeGeometry.limbusToEquatorArc,
+    equatorToBreakMm: eyeGeometry.equatorArc -
+      meridianArcLength(thetaFromOpticalAxis, semiAxes, meridian),
+    serrataToEquatorMm: Math.max(0,
+      meridianArcLength(serrata, semiAxes, meridian) - eyeGeometry.equatorArc),
     thetaFromOpticalAxisDeg: thetaFromOpticalAxis * RAD,
     alphaApplied,
+    semiAxes,
+    semiAxesExtrapolated: eyeGeometry.semiAxesExtrapolated,
     eyeGeometry
   };
 }

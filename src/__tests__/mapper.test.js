@@ -4,6 +4,9 @@ import {
   PROJECTION_LAWS,
   calculateRetinalParameters,
   calculateEyeGeometry,
+  meridianArcLength,
+  meridianThetaFromArc,
+  retinalSemiAxes,
   createProjectionModel,
   fieldToRetinalAngle,
   retinalToFieldAngle,
@@ -111,16 +114,19 @@ describe('createProjectionModel', () => {
     });
 
     expect(model.calibration.method).toBe('disc');
-    // 标定点处反算出的弧长必须等于 4.5mm
-    const arc = model.R * model.retinalAngleAt(0.1);
-    expect(arc).toBeCloseTo(ANATOMY.discToMaculaDistance, 9);
+    // 标定点处沿盘-斑子午线的椭球弧长必须等于 4.5mm
+    const theta = model.retinalAngleAt(0.1);
+    const arc = meridianArcLength(theta, model.semiAxes, model.calibration.anchorMeridianDeg);
+    expect(arc).toBeCloseTo(ANATOMY.discToMaculaDistance, 6);
   });
 
-  it('disc-anchored retinal angle is ~22.5° for a standard eye, not 18.7°', () => {
+  it('disc-anchored retinal angle is ~20.3° for a standard eye, not 18.7°', () => {
+    // 椭球后极曲率半径 12.9mm > 等效球半径 11.48mm, 因此同样 4.5mm 对应的
+    // 球心角比球模型 (22.5°) 小; 但仍明显大于 18.7° 这个**视角**值。
     const model = createProjectionModel({ maculaX: 0.5, maculaY: 0.5, discX: 0.6, discY: 0.5 });
     const deg = model.calibration.discRetinalAngleDeg;
-    expect(deg).toBeGreaterThan(21);
-    expect(deg).toBeLessThan(24);
+    expect(deg).toBeGreaterThan(19.5);
+    expect(deg).toBeLessThan(21);
     // 该球心角对应的视角明显更小
     expect(model.calibration.discFieldAngleDeg).toBeLessThan(deg);
   });
@@ -150,11 +156,13 @@ describe('createProjectionModel', () => {
     });
     expect(model.calibration.method).toBe('disc');
 
-    // P0: 尺度求根使盘-斑测地距离 (而非黄斑系径向距离) = 4.5mm
+    // P0/P2: 尺度求根使盘-斑沿其子午线的**椭球弧长** = 4.5mm
     const uM = model.unproject(0.45, 0.45).u;
     const uD = model.unproject(0.6, 0.55).u;
     const cosD = uM.x * uD.x + uM.y * uD.y + uM.z * uD.z;
-    expect(model.R * Math.acos(cosD)).toBeCloseTo(ANATOMY.discToMaculaDistance, 9);
+    const theta = Math.acos(Math.min(1, Math.max(-1, cosD)));
+    const arc = meridianArcLength(theta, model.semiAxes, model.calibration.anchorMeridianDeg);
+    expect(arc).toBeCloseTo(ANATOMY.discToMaculaDistance, 6);
   });
 
   it('retinalAngleAt is monotonic increasing', () => {
@@ -180,6 +188,108 @@ describe('createProjectionModel', () => {
   });
 });
 
+describe('retinal ellipsoid (Atchison 2005)', () => {
+  it('places the emmetropic semi-axes at the published MRI values', () => {
+    const g = calculateEyeGeometry(24);
+    // 24mm 眼对应约 +0.3D, 半轴应在正视值附近
+    expect(g.equatorialRadius.horizontal).toBeCloseTo(11.46, 1);
+    expect(g.equatorialRadius.vertical).toBeCloseTo(11.39, 1);
+    expect(g.semiAxes.axial).toBeCloseTo(10.19, 1);
+    // 扁椭球: 赤道 > 前后
+    expect(g.equatorialRadius.horizontal).toBeGreaterThan(g.semiAxes.axial);
+  });
+
+  it('keeps the equator nearly fixed while the axial semi-axis grows', () => {
+    // Atchison 回归: 赤道 +0.043mm/D, 前后 +0.163mm/D —— 差约 3.8 倍
+    const a = retinalSemiAxes(24);
+    const b = retinalSemiAxes(28);
+    const dEq = b.horizontal - a.horizontal;
+    const dAx = b.axial - a.axial;
+    expect(dAx / dEq).toBeGreaterThan(2.5);
+    expect(dAx / dEq).toBeLessThan(5);
+    // 单球模型会让二者同比例增长, 这正是要修的
+    const g24 = calculateEyeGeometry(24);
+    const g28 = calculateEyeGeometry(28);
+    const sphereGrowth = (g28.retinalRadius - g24.retinalRadius) /
+      (g28.equatorialRadius.horizontal - g24.equatorialRadius.horizontal);
+    expect(sphereGrowth).toBeGreaterThan(3);
+  });
+
+  it('accepts an explicit refraction and flags out-of-range extrapolation', () => {
+    const a = retinalSemiAxes(24, 0);
+    expect(a.source).toBe('refraction');
+    expect(a.sphericalEquivalent).toBe(0);
+    expect(a.extrapolated).toBe(false);
+
+    const b = retinalSemiAxes(30, 16);
+    expect(b.extrapolated).toBe(true);
+    // 高度近视外推下椭球趋于长椭球 (前后 > 赤道)
+    expect(b.axial).toBeGreaterThan(b.horizontal);
+  });
+
+  it('meridian arc length is a closed-form elliptic integral', () => {
+    const g = calculateEyeGeometry(24);
+    const a = g.equatorialRadius.horizontal;
+    const c = g.semiAxes.axial;
+    const m = 1 - (c / a) ** 2;
+
+    // 与数值积分对照 (Simpson, 10000 段)
+    const numeric = (theta) => {
+      const t = Math.atan2(a * Math.sin(theta), c * Math.cos(theta));
+      const n = 10000, h = t / n;
+      let sum = 0;
+      for (let i = 0; i <= n; i++) {
+        const u = i * h;
+        const f = Math.sqrt(1 - m * Math.sin(u) ** 2);
+        sum += i === 0 || i === n ? f : (i % 2 ? 4 * f : 2 * f);
+      }
+      return a * (sum * h) / 3;
+    };
+
+    for (const deg of [10, 45, 90, 117]) {
+      expect(meridianArcLength(deg * DEG, g.semiAxes, 0))
+        .toBeCloseTo(numeric(deg * DEG), 5);
+    }
+  });
+
+  it('local curvature at the apex is a²/c and at the equator is c²/a', () => {
+    const g = calculateEyeGeometry(24);
+    const h = 1e-6;
+    const slope = (deg) => {
+      const t = deg * DEG;
+      return (meridianArcLength(t + h, g.semiAxes, 0) -
+              meridianArcLength(t - h, g.semiAxes, 0)) / (2 * h);
+    };
+    expect(slope(0)).toBeCloseTo(g.apexRadius, 4);
+    expect(slope(90)).toBeCloseTo(g.equatorRadius, 4);
+    // 后极到赤道每度长度差约 1.45 倍
+    expect(slope(0) / slope(90)).toBeGreaterThan(1.35);
+  });
+
+  it('arc length ↔ central angle round-trips across the posterior retina', () => {
+    const g = calculateEyeGeometry(26);
+    for (const deg of [1, 5, 20, 60, 90, 110]) {
+      for (const mer of [0, 45, 90, 180, 270]) {
+        const arc = meridianArcLength(deg * DEG, g.semiAxes, mer);
+        expect(meridianThetaFromArc(arc, g.semiAxes, mer) * RAD)
+          .toBeCloseTo(deg, 6);
+      }
+    }
+  });
+
+  it('matches textbook whole-globe dimensions', () => {
+    const g = calculateEyeGeometry(24);
+    // 赤道周长 (视网膜面) 71-75mm; 角膜缘→后极 (外表面) 29-32mm;
+    // 角膜缘→赤道 ~9-12mm
+    expect(2 * Math.PI * g.equatorialRadius.horizontal).toBeGreaterThan(70);
+    expect(2 * Math.PI * g.equatorialRadius.horizontal).toBeLessThan(76);
+    expect(g.limbusToPoleArc + g.scleraThickness).toBeGreaterThan(28);
+    expect(g.limbusToPoleArc + g.scleraThickness).toBeLessThan(33);
+    expect(g.limbusToEquatorArc).toBeGreaterThan(9);
+    expect(g.limbusToEquatorArc).toBeLessThan(13);
+  });
+});
+
 describe('calculateRetinalParameters', () => {
   it('should return correct parameters for standard eye', () => {
     const params = calculateRetinalParameters(24, 200, 2000);
@@ -191,17 +301,25 @@ describe('calculateRetinalParameters', () => {
     expect(params.degPerPixel).toBe(0.1);
   });
 
-  it('reports a retinal arc of exactly R·fov (fov is a central-angle quantity)', () => {
+  it('reports a retinal arc equal to the ellipsoid meridian arc over ±fov/2', () => {
     const params = calculateRetinalParameters(24, 200, 2000);
-    const R = params.retinalRadius;
-    expect(params.retinalArc).toBeCloseTo(R * 200 * DEG, 9);
+    const g = calculateEyeGeometry(24);
+    const expected = 2 * meridianArcLength(100 * DEG, g.semiAxes, 0);
+    expect(params.retinalArc).toBeCloseTo(expected, 9);
+    // 明显短于单球口径 R·fov (单球会高估周边弧长)
+    expect(params.retinalArc).toBeLessThan(params.retinalRadius * 200 * DEG * 0.96);
   });
 
-  it('central scale equals the whole-field average under the default equidistant law', () => {
-    // ρ ∝ θ_r 全场线性 ⇒ 中心像素与平均像素代表的视网膜尺寸相同。
-    // 该线性律正是 Croft 2014 实测 1.79× 中心/周边面积比的自洽解。
+  it('central scale is the apex curvature radius, not the sphere radius (P2)', () => {
+    // 椭球每度长度沿子午线变化: 后极 ds/dθ = a²/c ≈ 12.9mm, 赤道 = c²/a ≈ 9.0mm。
+    // 平均 mm/px 因此必然小于中心值, 单球模型的「中心=平均」不再成立。
     const params = calculateRetinalParameters(24, 200, 2000);
-    expect(params.mmPerPixelCenter).toBeCloseTo(params.mmPerPixel, 6);
+    const g = calculateEyeGeometry(24);
+
+    expect(params.mmPerPixelCenter).toBeGreaterThan(params.mmPerPixel);
+    // mmPerPixelCenter ÷ (每像素对应的球心角) = 该点的局部曲率半径
+    const radPerPixel = ((100 * DEG) / 0.5) / params.imageWidth;
+    expect(params.mmPerPixelCenter / radPerPixel).toBeCloseTo(g.apexRadius, 6);
   });
 
   it('stereographic (sensitivity analysis) magnifies the centre relative to the average', () => {
@@ -209,23 +327,32 @@ describe('calculateRetinalParameters', () => {
     expect(params.mmPerPixelCenter).toBeGreaterThan(params.mmPerPixel);
   });
 
-  it('radial scale is constant under the default equidistant law', () => {
+  it('angular scale is constant under the default equidistant law', () => {
     const model = createProjectionModel({ fov: 200 });
     const h = 1e-6;
     const scaleAt = (dist) =>
-      model.R * (model.retinalAngleAt(dist + h) - model.retinalAngleAt(dist - h)) / (2 * h);
+      (model.retinalAngleAt(dist + h) - model.retinalAngleAt(dist - h)) / (2 * h);
 
-    // 常数应为 R·k (θ_r = k·dist); 中央差分有 ~1e-9 量级浮点噪声, 放宽精度
+    // θ_r = k·dist ⇒ dθ/ddist = k; 中央差分有 ~1e-9 量级浮点噪声
     for (const dist of [0.05, 0.15, 0.25, 0.35, 0.45]) {
-      expect(scaleAt(dist)).toBeCloseTo(model.R * model.scale, 6);
+      expect(scaleAt(dist)).toBeCloseTo(model.scale, 6);
     }
+  });
+
+  it('metric scale falls from apex to equator under the standard ellipsoid', () => {
+    // 沿子午线的 mm/rad = 局部曲率半径: 后极 a²/c ≈ 12.9mm → 赤道 c²/a ≈ 9.0mm
+    const model = createProjectionModel({ fov: 200 });
+    const g = model.eyeGeometry;
+    expect(g.apexRadius).toBeGreaterThan(g.equatorRadius);
+    expect(g.apexRadius / g.equatorRadius).toBeGreaterThan(1.35);
+    expect(g.apexRadius / g.equatorRadius).toBeLessThan(1.55);
   });
 
   it('radial scale falls monotonically under stereographic (sensitivity analysis)', () => {
     const model = createProjectionModel({ fov: 200, projection: 'stereographic' });
     const h = 1e-6;
     const scaleAt = (dist) =>
-      model.R * (model.retinalAngleAt(dist + h) - model.retinalAngleAt(dist - h)) / (2 * h);
+      (model.retinalAngleAt(dist + h) - model.retinalAngleAt(dist - h)) / (2 * h);
 
     let prev = Infinity;
     for (const dist of [0.05, 0.15, 0.25, 0.35, 0.45]) {
@@ -275,7 +402,9 @@ describe('imageToSphere', () => {
     // 图像中心 = 投影极点; 其距黄斑的角 = 黄斑自身的极点系角
     expect(centre.theta).toBeGreaterThan(0);
     expect(centre.theta).toBeCloseTo(model.maculaTheta, 12);
-    expect(centre.arcFromMaculaMm).toBeCloseTo(model.R * model.maculaTheta, 9);
+    expect(centre.arcFromMaculaMm).toBeCloseTo(
+      meridianArcLength(model.maculaTheta, model.semiAxes, centre.phi * RAD), 9
+    );
   });
 
   it('with an eccentric macula, phi is still measured in the macula tangent plane (P0)', () => {
@@ -290,7 +419,7 @@ describe('imageToSphere', () => {
   it('reuses a supplied model', () => {
     const model = createProjectionModel({ maculaX: 0.5, maculaY: 0.5, discX: 0.6, discY: 0.5 });
     const viaModel = imageToSphere(0.6, 0.5, 24, 200, { model });
-    expect(viaModel.arcFromMaculaMm).toBeCloseTo(ANATOMY.discToMaculaDistance, 9);
+    expect(viaModel.arcFromMaculaMm).toBeCloseTo(ANATOMY.discToMaculaDistance, 6);
   });
 });
 
@@ -404,13 +533,15 @@ describe('getAnatomyReference', () => {
 });
 
 describe('getTheoreticalDiscPosition', () => {
-  it('derives theta from the 4.5mm physical distance', () => {
+  it('derives theta from the 4.5mm physical distance along its meridian', () => {
     const disc = getTheoreticalDiscPosition(24);
-    const R = calculateEyeGeometry(24).retinalRadius;
+    const g = calculateEyeGeometry(24);
 
-    expect(R * disc.theta).toBeCloseTo(ANATOMY.discToMaculaDistance, 9);
-    expect(disc.angleFromMacula).toBeGreaterThan(21);
-    expect(disc.angleFromMacula).toBeLessThan(24);
+    const arc = meridianArcLength(disc.theta, g.semiAxes, disc.phi * RAD);
+    expect(arc).toBeCloseTo(ANATOMY.discToMaculaDistance, 6);
+    // 椭球后极曲率半径大于等效球半径 ⇒ 角度落在 20° 左右
+    expect(disc.angleFromMacula).toBeGreaterThan(19.5);
+    expect(disc.angleFromMacula).toBeLessThan(21);
   });
 
   it('places the disc nasally, not almost straight up', () => {
@@ -504,15 +635,21 @@ describe('calculateBreakToMacula', () => {
     const disc = { x: 0.65, y: 0.5 };
     const acrossPole = calculateBreakToMacula(0.45, 0.5, macula, disc);
     const model = acrossPole.model;
-    expect(acrossPole.distanceMm).toBeCloseTo(2 * model.R * model.maculaTheta, 9);
+    // 测地角仍是 2×黄斑极点角 (球面几何不变), 弧长按椭球换算
+    const expected = meridianArcLength(
+      2 * model.maculaTheta, model.semiAxes, model.calibration.anchorMeridianDeg
+    );
+    expect(acrossPole.angleDeg).toBeCloseTo(2 * model.maculaTheta * RAD, 9);
+    expect(acrossPole.distanceMm).toBeCloseTo(expected, 9);
   });
 
-  it('the disc anchor yields a central angle ~20% larger than the 18.7° field angle', () => {
-    // 这正是旧模型(把 18.7° 当球心角)所缺的那 20% 系统偏差
+  it('the disc anchor yields a central angle larger than the 18.7° field angle', () => {
+    // 18.7° 是**视角**, 球心角必然更大。椭球后极曲率半径 12.9mm 下比值约 1.09;
+    // 旧球模型给 22.5°/18.7° ≈ 1.20 —— 差异来自形状, 不是锚点。
     const model = createProjectionModel({ maculaX: 0.5, maculaY: 0.5, discX: 0.6, discY: 0.5 });
     const ratio = model.calibration.discRetinalAngleDeg / ANATOMY.combinedDiscMaculaAngle;
-    expect(ratio).toBeGreaterThan(1.15);
-    expect(ratio).toBeLessThan(1.25);
+    expect(ratio).toBeGreaterThan(1.05);
+    expect(ratio).toBeLessThan(1.15);
   });
 
   it('flags points beyond the nominal field', () => {
@@ -521,13 +658,17 @@ describe('calculateBreakToMacula', () => {
     expect(calculateBreakToMacula(0.7, 0.5, macula).isBeyondNominalField).toBe(false);
   });
 
-  it('should handle custom axial length', () => {
+  it('uses the ellipsoid semi-axes of the requested axial length', () => {
     const base = { x: 0.5, y: 0.5 };
     const longer = calculateBreakToMacula(0.6, 0.5, base, undefined, { axialLength: 26, fov: 200 });
     const standard = calculateBreakToMacula(0.6, 0.5, base, undefined, { axialLength: 24, fov: 200 });
 
     expect(longer.distanceMm).toBeGreaterThan(0);
-    expect(longer.distanceMm).toBeGreaterThan(standard.distanceMm);
+    // 近视加深时椭球变「圆」(前后半轴涨得比赤道快), 后极曲率半径反而减小,
+    // 因此小角度处的弧长小于正视眼。赤道附近的结论相反 —— 见 calculateLimbusDistance。
+    expect(longer.model.eyeGeometry.apexRadius)
+      .toBeLessThan(standard.model.eyeGeometry.apexRadius);
+    expect(longer.distanceMm).toBeLessThan(standard.distanceMm);
   });
 
   it('stereographic projection compresses the periphery differently from equidistant', () => {
@@ -570,13 +711,15 @@ describe('calculateLimbusDistance', () => {
     expect(result.alphaApplied).toBe(0);
   });
 
-  it('subtracts the break arc along the meridian', () => {
+  it('subtracts the break arc along the meridian (ellipsoid segment)', () => {
     const result = calculateLimbusDistance(90);
     const eyeGeometry = calculateEyeGeometry(24);
-    const R = eyeGeometry.retinalRadius;
+    const equatorArc = meridianArcLength(Math.PI / 2, eyeGeometry.semiAxes, 0);
 
-    expect(result.arcToMaculaMm).toBeCloseTo(R * 90 * DEG, 9);
-    expect(result.limbusToBreakMm).toBeCloseTo(eyeGeometry.limbusToPoleArc - R * 90 * DEG, 9);
+    expect(result.arcToMaculaMm).toBeCloseTo(equatorArc, 9);
+    expect(result.limbusToBreakMm).toBeCloseTo(eyeGeometry.limbusToPoleArc - equatorArc, 9);
+    // 赤道处 -> 只剩前段球 (角膜缘 → 赤道)
+    expect(result.limbusToBreakMm).toBeCloseTo(eyeGeometry.limbusToEquatorArc, 9);
   });
 
   it('external (scleral) arc always exceeds the internal (retinal) arc', () => {
@@ -643,11 +786,38 @@ describe('calculateLimbusDistance', () => {
     expect(sup.limbusToBreakMm).toBeCloseTo(inf.limbusToBreakMm, 9);
   });
 
-  it('should use custom axial length', () => {
+  it('is continuous across the equator seam', () => {
+    // 90° 两侧用不同模型 (前段球 / 后段椭球), 但接缝处必须给出同一个值
+    const below = calculateLimbusDistance(89.9999);
+    const above = calculateLimbusDistance(90.0001);
+    const at = calculateLimbusDistance(90);
+    expect(below.limbusToBreakMm).toBeCloseTo(at.limbusToBreakMm, 3);
+    expect(above.limbusToBreakMm).toBeCloseTo(at.limbusToBreakMm, 3);
+    expect(Math.abs(above.limbusToBreakMm - below.limbusToBreakMm)).toBeLessThan(0.01);
+  });
+
+  it('covers the equator → ora serrata band with the ellipsoid', () => {
+    // 锯齿缘 117° 仍属视网膜, 必须走椭球 (不能退回前段球)
+    const g = calculateEyeGeometry(24);
+    const ora = calculateLimbusDistance(ANATOMY.serrataPolarAngleDeg);
+    const expected = g.limbusToEquatorArc + g.equatorArc -
+      meridianArcLength(ANATOMY.serrataPolarAngleDeg * DEG, g.semiAxes, 0);
+
+    expect(ora.limbusToBreakMm).toBeCloseTo(expected, 9);
+    // 角膜缘 → 锯齿缘: 鼻侧 5mm, 颞侧 7mm (教科书) —— 落在同一量级
+    expect(ora.limbusToBreakMm).toBeGreaterThan(4);
+    expect(ora.limbusToBreakMm).toBeLessThan(9);
+    expect(ora.equatorToBreakMm).toBeLessThan(0);
+  });
+
+  it('reports a larger limbus-to-break arc for a longer eye (equatorial growth)', () => {
     const resultStandard = calculateLimbusDistance(30, 24);
     const resultLonger = calculateLimbusDistance(30, 26);
 
-    expect(resultLonger.arcToMaculaMm).toBeGreaterThan(resultStandard.arcToMaculaMm);
+    // 30° 处后极曲率半径随近视减小, 该点自身的弧长反而略小;
+    // 但「角膜缘 → 裂孔」整段 (含更大的前段球与前移的赤道) 必须更长。
+    expect(resultLonger.arcToMaculaMm).toBeLessThan(resultStandard.arcToMaculaMm);
+    expect(resultLonger.limbusToBreakMm).toBeGreaterThan(resultStandard.limbusToBreakMm);
   });
 });
 

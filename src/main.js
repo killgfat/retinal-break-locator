@@ -443,7 +443,13 @@ function updateInfo() {
   });
   const eyeGeometry = calculateEyeGeometry(geo.axialLength, geo.corneaDiameter, geo.corneaKValue);
 
-  document.getElementById('retina-radius').textContent = `${eyeGeometry.retinalRadius.toFixed(2)} mm`;
+  // 后部视网膜为扁椭球 (Atchison 2005): 赤道半轴大, 前后半轴小。
+  // 不再显示单一「球半径」—— 那个数会把前后径与横径绑死 (赤道跟着眼轴涨)。
+  const eq = eyeGeometry.equatorialRadius;
+  const ax = eyeGeometry.semiAxes.axial;
+  document.getElementById('retina-radius').textContent =
+    `${eq.horizontal.toFixed(2)} × ${eq.vertical.toFixed(2)} × ${ax.toFixed(2)} mm` +
+    (eyeGeometry.semiAxesExtrapolated ? ' (外推)' : '');
   // 等距球心角口径下中心与全场的像素尺度一致;覆盖比例为占视网膜 (以锯齿缘为界)
   document.getElementById('pixel-scale').textContent =
     `${params.mmPerPixelCenter.toFixed(4)} mm/px · 视网膜覆盖 ${(params.retinalCoverage * 100).toFixed(0)}%`;
