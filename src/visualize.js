@@ -351,6 +351,9 @@ export function updateTexture(image, options = {}) {
     corneaDiameter = null,
     corneaKValue = null,
     projection,
+    equatorialDiameter = null,
+    equatorialDiameterSurface,
+    sphericalEquivalent = null,
     maculaX = 0.5,
     maculaY = 0.5,
     discX = null,
@@ -361,6 +364,7 @@ export function updateTexture(image, options = {}) {
 
   currentModel = createProjectionModel({
     axialLength, fov, corneaDiameter, corneaKValue, projection,
+    equatorialDiameter, equatorialDiameterSurface, sphericalEquivalent,
     maculaX, maculaY, discX, discY, imageAspect
   });
   currentEyeGeometry = currentModel.eyeGeometry;
@@ -375,6 +379,9 @@ export function updateTexture(image, options = {}) {
     corneaDiameter,
     corneaKValue,
     projection,
+    equatorialDiameter,
+    equatorialDiameterSurface,
+    sphericalEquivalent,
     maculaX,
     maculaY,
     discX,
@@ -432,7 +439,10 @@ export function setMarkers(markers, options = {}) {
   currentMarkers = { ...markers };
   
   if (currentTexture && markers.macula) {
-    const { texture, fov, axialLength, corneaDiameter, corneaKValue, projection, imageAspect } = currentTexture;
+    const {
+      texture, fov, axialLength, corneaDiameter, corneaKValue, projection,
+      equatorialDiameter, equatorialDiameterSurface, sphericalEquivalent, imageAspect
+    } = currentTexture;
     const { x: maculaX, y: maculaY } = markers.macula;
     const discX = markers.disc ? markers.disc.x : null;
     const discY = markers.disc ? markers.disc.y : null;
@@ -461,6 +471,7 @@ export function setMarkers(markers, options = {}) {
       
       currentModel = createProjectionModel({
         axialLength, fov, corneaDiameter, corneaKValue, projection,
+        equatorialDiameter, equatorialDiameterSurface, sphericalEquivalent,
         maculaX, maculaY, discX, discY, imageAspect
       });
       currentEyeGeometry = currentModel.eyeGeometry;

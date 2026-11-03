@@ -274,20 +274,49 @@ export function refractionFromAxialLength(axialLength) {
  *
  * @param {number} axialLength - 眼轴 (mm)
  * @param {number|null} sphericalEquivalent - 球镜度数 M (D, 近视取正); 省略则按眼轴粗估
+ * @param {Object} options
+ * @param {number|null} options.equatorialDiameter - 实测赤道横径 (mm)。默认按**巩膜外表面**
+ *   (sclera-sclera, CT/超声口径) 解释, 内部减去 2×赤道巩膜厚度得视网膜面半轴。
+ *   提供后纵向半轴按同比例缩放 (保持 Atchison 的 aV/aH ≈ 0.992)。
+ * @param {'external'|'internal'} options.equatorialDiameterSurface - 直径口径, 默认 'external'
  * @returns {Object} { horizontal, vertical, axial, sphericalEquivalent, source, extrapolated }
  */
-export function retinalSemiAxes(axialLength, sphericalEquivalent = null) {
+export function retinalSemiAxes(axialLength, sphericalEquivalent = null, options = {}) {
   const e = ANATOMY.retinalEllipsoid;
   const M = Number.isFinite(sphericalEquivalent)
     ? sphericalEquivalent
     : refractionFromAxialLength(axialLength);
 
+  const aHRegression = e.horizontal.mean + e.horizontal.perDiopter * M;
+  const aVRegression = e.vertical.mean + e.vertical.perDiopter * M;
+  const c = e.axial.mean + e.axial.perDiopter * M;
+
+  const dEq = options.equatorialDiameter;
+  if (!(Number.isFinite(dEq) && dEq > 0)) {
+    return {
+      horizontal: aHRegression,
+      vertical: aVRegression,
+      axial: c,
+      sphericalEquivalent: M,
+      source: Number.isFinite(sphericalEquivalent) ? 'refraction' : 'axial',
+      extrapolated: M > e.fittedToDiopters
+    };
+  }
+
+  // 实测直径 → 视网膜面半轴
+  const surface = options.equatorialDiameterSurface === 'internal' ? 'internal' : 'external';
+  const tEq = surface === 'external' ? scleraThicknessAt(Math.PI / 2) : 0;
+  const aH = Math.max(1, dEq / 2 - tEq);
+
   return {
-    horizontal: e.horizontal.mean + e.horizontal.perDiopter * M,
-    vertical: e.vertical.mean + e.vertical.perDiopter * M,
-    axial: e.axial.mean + e.axial.perDiopter * M,
+    horizontal: aH,
+    vertical: aH * (aVRegression / aHRegression),
+    axial: c,
     sphericalEquivalent: M,
-    source: Number.isFinite(sphericalEquivalent) ? 'refraction' : 'axial',
+    source: 'measured',
+    equatorialDiameter: dEq,
+    equatorialDiameterSurface: surface,
+    equatorialDiameterThickness: tEq,
     extrapolated: M > e.fittedToDiopters
   };
 }
@@ -451,7 +480,10 @@ export function calculateEyeGeometry(
   const sphereCenterFromCornea = axialLength - scleralRadius;
 
   // --- 后部视网膜椭球 (赤道 → 后极) ---
-  const semiAxes = retinalSemiAxes(axialLength, sphericalEquivalent);
+  const semiAxes = retinalSemiAxes(axialLength, sphericalEquivalent, {
+    equatorialDiameter: options.equatorialDiameter ?? null,
+    equatorialDiameterSurface: options.equatorialDiameterSurface
+  });
   // 前段 (角膜缘 → 赤道) 的半径取赤道半轴。赤道直径几乎不随眼轴变化
   // (Bekerman 2014 CT: 横径与屈光度无关), 因此前段弧长也必须基本恒定。
   // 若沿用「角膜缘圆 + 后极」拟合的球半径, 它会随眼轴一起膨胀
@@ -639,7 +671,11 @@ export function createProjectionModel(options = {}) {
     axialLength,
     corneaDiameter,
     corneaKValue,
-    { sphericalEquivalent: options.sphericalEquivalent ?? null }
+    {
+      sphericalEquivalent: options.sphericalEquivalent ?? null,
+      equatorialDiameter: options.equatorialDiameter ?? null,
+      equatorialDiameterSurface: options.equatorialDiameterSurface
+    }
   );
   // R 用于 3D 坐标缩放 (需与 visualise 的球面网格一致), 保持前段球半径。
   const R = eyeGeometry.retinalRadius;
@@ -1190,7 +1226,10 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
     imageAspect = 1,
     corneaDiameter = null,
     corneaKValue = null,
-    projection = DEFAULT_PROJECTION
+    projection = DEFAULT_PROJECTION,
+    equatorialDiameter = null,
+    equatorialDiameterSurface,
+    sphericalEquivalent = null
   } = options;
 
   const maculaX = macula?.x ?? 0.5;
@@ -1204,6 +1243,9 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
     corneaDiameter,
     corneaKValue,
     projection,
+    equatorialDiameter,
+    equatorialDiameterSurface,
+    sphericalEquivalent,
     maculaX,
     maculaY,
     discX: hasDisc ? disc.x : null,
@@ -1241,6 +1283,7 @@ export function calculateBreakToMacula(imageX, imageY, macula, disc, options = {
     const evalAt = (dmm) => {
       const mm = createProjectionModel({
         axialLength, fov, corneaDiameter, corneaKValue, projection,
+        equatorialDiameter, equatorialDiameterSurface, sphericalEquivalent,
         maculaX, maculaY, discX: disc.x, discY: disc.y, imageAspect,
         discToMaculaDistance: dmm
       });
@@ -1325,7 +1368,11 @@ export function calculateLimbusDistance(
     axialLength,
     corneaDiameter,
     corneaKValue,
-    { sphericalEquivalent }
+    {
+      sphericalEquivalent,
+      equatorialDiameter: options.equatorialDiameter ?? null,
+      equatorialDiameterSurface: options.equatorialDiameterSurface
+    }
   );
 
   const theta = clamp(thetaDeg, 0, 180) * DEG;

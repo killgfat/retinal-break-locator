@@ -217,6 +217,47 @@ describe('retinal ellipsoid (Atchison 2005)', () => {
     expect(sphereGrowth).toBeGreaterThan(3);
   });
 
+  it('accepts a measured equatorial diameter (sclera-sclera)', () => {
+    // 24.2mm 外表面 → 减去 2×0.42 赤道巩膜厚度 → 视网膜面半轴 11.68
+    const measured = retinalSemiAxes(24, null, { equatorialDiameter: 24.2 });
+    const tEq = scleraThicknessAt(Math.PI / 2);   // 0.42
+
+    expect(measured.source).toBe('measured');
+    expect(measured.horizontal).toBeCloseTo(24.2 / 2 - tEq, 9);
+    expect(measured.equatorialDiameter).toBe(24.2);
+    expect(measured.equatorialDiameterSurface).toBe('external');
+
+    // 纵向按 Atchison 的 aV/aH 比例缩放, 不独立设定
+    const regression = retinalSemiAxes(24);
+    expect(measured.vertical / measured.horizontal)
+      .toBeCloseTo(regression.vertical / regression.horizontal, 9);
+
+    // 前后半轴仍由屈光度/眼轴决定, 不受赤道直径影响
+    expect(measured.axial).toBeCloseTo(regression.axial, 9);
+  });
+
+  it('accepts an internal (retinal-surface) diameter without subtracting thickness', () => {
+    const internal = retinalSemiAxes(24, null, {
+      equatorialDiameter: 22.9,
+      equatorialDiameterSurface: 'internal'
+    });
+    expect(internal.horizontal).toBeCloseTo(22.9 / 2, 9);
+    expect(internal.equatorialDiameterThickness).toBe(0);
+  });
+
+  it('measured diameter overrides the regression but keeps the geometry consistent', () => {
+    const g = calculateEyeGeometry(24, null, null, { equatorialDiameter: 26.0 });
+
+    expect(g.semiAxesSource).toBe('measured');
+    expect(g.equatorialRadius.horizontal)
+      .toBeCloseTo(13.0 - scleraThicknessAt(Math.PI / 2), 9);
+    // 前段半径随赤道半轴变化
+    expect(g.anteriorRadius).toBeCloseTo(g.equatorialRadius.horizontal, 9);
+    // 赤道周长随之变化
+    expect(2 * Math.PI * g.equatorialRadius.horizontal)
+      .toBeGreaterThan(2 * Math.PI * calculateEyeGeometry(24).equatorialRadius.horizontal);
+  });
+
   it('accepts an explicit refraction and flags out-of-range extrapolation', () => {
     const a = retinalSemiAxes(24, 0);
     expect(a.source).toBe('refraction');
