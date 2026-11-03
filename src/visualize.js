@@ -178,14 +178,6 @@ export function createEyeballGeometry(eyeGeometry) {
         axial = a * Math.cos(latAngle);
       }
 
-      // 角膜球冠: 极径 ≤ 角膜半径的前段顶点改成球冠。
-      // 加浮点容差, 避免最后一圈因 1e-15 误差被漏掉。
-      if (latAngle > latEquator && radial <= halfCornea + 1e-9) {
-        const localR = Math.min(radial, halfCornea);
-        axial = corneaApex + corneaRadius -
-          Math.sqrt(Math.max(0, corneaRadius * corneaRadius - localR * localR));
-      }
-
       vertices.push(radial * cosLon, radial * sinLon, -axial);
     }
   }
@@ -198,6 +190,43 @@ export function createEyeballGeometry(eyeGeometry) {
       const d = c + 1;
       indices.push(a, b, d);
       indices.push(a, d, c);
+    }
+  }
+
+  // --- 角膜球冠 (独立网格) ---
+  //
+  // 必须单独生成。若试图在前段网格里「把 radial ≤ WTW/2 的顶点改成球冠」,
+  // lat 均匀采样每段约 2°, 而该判据只覆盖最后一圈 (radial 从 aH 降到 WTW/2
+  // 只跨 0.5°), 结果只剩一个环, 球冠整体消失。
+  //
+  // 球面半径 = K 值, 顶点在最前, 边缘正好落在角膜缘圈 (radial = WTW/2)。
+  const segCorneaLat = 24;
+  const latCorneaMax = Math.asin(Math.min(1, halfCornea / corneaRadius));
+  // 角膜顶点 z (前方为正), 球心在其后 Rc
+  const zApex = -axialLimbus + corneaSag;
+  const zCorneaCentre = zApex - corneaRadius;
+  const corneaBase = vertices.length / 3;
+
+  for (let i = 0; i <= segCorneaLat; i++) {
+    const lc = (i / segCorneaLat) * latCorneaMax;
+    const r = corneaRadius * Math.sin(lc);
+    const z = zCorneaCentre + corneaRadius * Math.cos(lc);
+
+    for (let j = 0; j <= segmentsLon; j++) {
+      const lon = (j / segmentsLon) * 2 * Math.PI;
+      vertices.push(r * Math.cos(lon), r * Math.sin(lon), z);
+    }
+  }
+
+  for (let i = 0; i < segCorneaLat; i++) {
+    for (let j = 0; j < segmentsLon; j++) {
+      const a = corneaBase + i * (segmentsLon + 1) + j;
+      const b = a + 1;
+      const c = a + segmentsLon + 1;
+      const d = c + 1;
+      // 与主体相反的绕序: 角膜面法线朝外 (+z)
+      indices.push(a, d, b);
+      indices.push(a, c, d);
     }
   }
   

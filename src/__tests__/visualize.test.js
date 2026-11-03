@@ -51,9 +51,34 @@ describe('createEyeballGeometry (三段式轮廓)', () => {
       }
       // 角膜在前面 (z > 0), 赤道也 > 0, 但角膜顶点更靠前
       expect(maxZ).toBeGreaterThan(g.equatorialRadius.horizontal * 0.8);
-      expect(geo.index.count / 3).toBe(72 * 96 * 2);
+      // 主体 72×96×2 + 角膜球冠 24×96×2
+      expect(geo.index.count / 3).toBe(72 * 96 * 2 + 24 * 96 * 2);
       geo.dispose();
     }
+  });
+
+  it('renders the corneal cap as a surface, not a single ring', () => {
+    // 回归: 早期实现把「radial ≤ WTW/2 的前段顶点」改成球冠, 但 lat 每段约 2°,
+    // 该判据只覆盖最后一圈, 结果只剩一个环 —— 视图上等于角膜消失。
+    // 现在球冠是独立网格 (24 段), 顶点附近应有成片的顶点。
+    const g = calculateEyeGeometry(24);
+    const geo = createEyeballGeometry(g);
+    const p = geo.attributes.position.array;
+
+    let maxZ = -Infinity;
+    for (let i = 0; i < p.length; i += 3) maxZ = Math.max(maxZ, p[i + 2]);
+
+    const halfWtw = g.corneaDiameter / 2;
+    const apexRing = [];
+    for (let i = 0; i < p.length; i += 3) {
+      if (p[i + 2] > maxZ - 0.2) {
+        apexRing.push(Math.hypot(p[i], p[i + 1]));
+      }
+    }
+    // 顶点附近应是半径很小的一圈, 而不是一个孤立点
+    expect(apexRing.length).toBeGreaterThan(50);
+    expect(Math.max(...apexRing)).toBeLessThan(halfWtw * 0.35);
+    geo.dispose();
   });
 
   it('always includes a corneal cap, for every axial length', () => {
@@ -76,7 +101,7 @@ describe('createEyeballGeometry (三段式轮廓)', () => {
       const g2 = g.equatorialRadius.horizontal;
       expect(maxZ).toBeGreaterThan(g2 * 0.75);
 
-      // 角膜缘那一圈必须存在且径向 ≤ WTW/2
+      // 角膜缘那一圈必须存在且径向 ≈ WTW/2
       const halfWtw = g.corneaDiameter / 2;
       let foundLimbus = false;
       for (let i = 0; i < p.length; i += 3) {
@@ -85,6 +110,62 @@ describe('createEyeballGeometry (三段式轮廓)', () => {
       }
       expect(foundLimbus).toBe(true);
 
+      // 角膜必须有「面」而不是一个环: 顶点附近需有足够多的顶点
+      let apexCount = 0;
+      for (let i = 0; i < p.length; i += 3) {
+        if (p[i + 2] > maxZ - 0.05) {
+          apexCount++;
+          expect(Math.hypot(p[i], p[i + 1])).toBeLessThan(halfWtw);
+        }
+      }
+      expect(apexCount).toBeGreaterThan(20);
+
+      geo.dispose();
+    }
+  });
+
+  it('the corneal cap meets the limbus without a gap', () => {
+    // 球冠是独立网格, 边缘必须与主体最后一圈重合 (位置相同)
+    for (const al of [20, 24, 30]) {
+      const g = calculateEyeGeometry(al);
+      const geo = createEyeballGeometry(g);
+      const p = geo.attributes.position.array;
+      const halfWtw = g.corneaDiameter / 2;
+
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (let i = 0; i < p.length; i += 3) {
+        const rad = Math.hypot(p[i], p[i + 1]);
+        // 只看前半球: 后段 radial 也会经过 WTW/2, z 为负
+        if (Math.abs(rad - halfWtw) < 1e-3 && p[i + 2] > 0) {
+          minZ = Math.min(minZ, p[i + 2]);
+          maxZ = Math.max(maxZ, p[i + 2]);
+        }
+      }
+      // 主体最后一圈是离散采样, 略偏离 WTW/2; 球冠边缘精确。
+      // 两者之差应远小于可见尺度 (<0.01mm)
+      expect(maxZ - minZ).toBeLessThan(0.01);
+      expect(maxZ).toBeGreaterThan(0);
+      geo.dispose();
+    }
+  });
+
+  it('the corneal apex protrudes by the corneal sagitta', () => {
+    for (const al of [20, 24, 30]) {
+      const g = calculateEyeGeometry(al);
+      const geo = createEyeballGeometry(g);
+      const p = geo.attributes.position.array;
+
+      let maxZ = -Infinity;
+      for (let i = 0; i < p.length; i += 3) maxZ = Math.max(maxZ, p[i + 2]);
+
+      const halfWtw = g.corneaDiameter / 2;
+      const sag = g.corneaRadius -
+        Math.sqrt(g.corneaRadius ** 2 - halfWtw ** 2);
+      // 角膜顶点距角膜缘平面 = 矢高 (2.6mm 左右)
+      const zLimbus = maxZ - sag;
+      expect(zLimbus).toBeGreaterThan(0);
+      expect(sag).toBeCloseTo(2.63, 1);
       geo.dispose();
     }
   });
