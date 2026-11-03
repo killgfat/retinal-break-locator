@@ -623,61 +623,66 @@ function createLimbusArcLine(model, eyeSide) {
   // 裂孔向量 (黄斑基准系: 黄斑 = +z)
   const p = model.unproject(currentMarkers.hole.x, currentMarkers.hole.y);
   const m = model.toMaculaFrame(p.u);
-  const uH = { x: m.x / model.R, y: m.y / model.R, z: m.z / model.R };
+  // --- 路径参数化必须在**黄斑基准系**里进行 ---
+  //
+  // 注: 此处不再用 angle alpha 修正光轴极点。角膜缘环是以光轴为轴画的,
+  // 但环在屏幕上是一个正圆, 方位差异只有 α·sinφ ≈ 0.5mm, 视觉可忽略;
+  // 用黄斑系参数化才能保证末端与环严格重合。数值输出仍由
+  // calculateLimbusDistance 做 alpha 修正, 两者互不影响。
+  //
+  // 之前混用了两套角度: startTheta 由 acos(uH·uAxis) 得出 (自**光轴**量起),
+  // 却交给 surfacePoint 当作自**黄斑**量起, 于是 θ 一大就跑到错误位置;
+  // 且椭球参数式在 θ>90° 会外推到球面之外, 线就"浮"起来贴不到角膜缘。
+  //
+  // 现在全程用黄斑系: 起点 = 裂孔的 m.theta, 终点 = latLimbus
+  // (与角膜缘环同一个角, 因此末端严格落在环上)。
+  const g = currentEyeGeometry;
+  const halfWtw = g.corneaDiameter / 2;
+  const latLimbus = Math.PI - Math.asin(Math.min(1, halfWtw / g.anteriorRadius));
 
-  // 光轴极点 = 黄斑向鼻侧转 angle alpha; 角膜缘是绕光轴的等纬圆
-  const alpha = ANATOMY.angleAlpha * DEG;
-  const phiNasal = eyeSide === 'right' ? 0 : Math.PI;
-  const uAxis = {
-    x: Math.sin(alpha) * Math.cos(phiNasal),
-    y: Math.sin(alpha) * Math.sin(phiNasal),
-    z: Math.cos(alpha)
-  };
+  const thetaStart = m.theta;
+  const phi = m.phi;
+  if (!(latLimbus > thetaStart + 1e-6)) return null;
 
-  const cosStart = uH.x * uAxis.x + uH.y * uAxis.y + uH.z * uAxis.z;
-  const startTheta = Math.acos(Math.max(-1, Math.min(1, cosStart)));
-  // 角膜缘: 与 mapper 内表面同几何 (赤道 + 前段弧长/半径), 不用等效球反推
-  const endTheta = currentEyeGeometry.limbusAngleAnterior;
-
-  if (!(endTheta > startTheta)) return null;
-
-  // 大圆方向: 裂孔在光轴极点切平面内的分量
-  let e1 = {
-    x: uH.x - cosStart * uAxis.x,
-    y: uH.y - cosStart * uAxis.y,
-    z: uH.z - cosStart * uAxis.z
-  };
-  const e1Len = Math.sqrt(e1.x * e1.x + e1.y * e1.y + e1.z * e1.z);
-  if (e1Len < 1e-9) return null; // 裂孔恰在光轴极点上, 方向不定
-  e1 = { x: e1.x / e1Len, y: e1.y / e1Len, z: e1.z / e1Len };
+  const aMeridian = meridianSemiAxis(model.semiAxes, phi * 180 / Math.PI);
+  const cAxial = model.semiAxes.axial;
 
   const points = [];
   const segments = 64;
 
-  // 黄斑基准系内的方位: 由切平面基底的 x/y 分量给出
-  // (uAxis 与 e1 张成该路径所在的大圆平面, 与 mapper 的分段弧长同一子午线)
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
-    const theta = startTheta + t * (endTheta - startTheta);
-    const s = Math.sin(theta);
-    const c = Math.cos(theta);
+    const theta = thetaStart + t * (latLimbus - thetaStart);
 
-    // 该点相对黄斑的方位 (用于查椭球子午线半轴)
-    const radialDir = {
-      x: s * e1.x + c * uAxis.x,
-      y: s * e1.y + c * uAxis.y,
-      z: s * e1.z + c * uAxis.z
-    };
-    const phi = Math.atan2(radialDir.y, radialDir.x);
-
-    // 椭球面上的点 (theta 已含 alpha 修正)
-    const sp = surfacePoint(theta, phi, model.semiAxes);
+    let radial, axial;
+    if (theta <= Math.PI / 2) {
+      // 后段: 椭球面
+      const sp = surfacePoint(theta, phi, model.semiAxes);
+      radial = sp.radial;
+      axial = sp.axial;
+    } else {
+      // 前段: 球 (半径取该子午线的赤道半轴), 与 createEyeballGeometry 一致
+      radial = aMeridian * Math.sin(theta);
+      axial = aMeridian * Math.cos(theta);
+    }
 
     points.push(new THREE.Vector3(
-      sp.radial * Math.cos(phi),
-      sp.radial * Math.sin(phi),
-      -sp.axial
+      radial * Math.cos(phi),
+      radial * Math.sin(phi),
+      -axial
     ));
+  }
+
+  // 末端强制落在角膜缘环上: 消除离散/近似造成的亚毫米缝隙
+  if (points.length) {
+    const last = points[points.length - 1];
+    const rLen = Math.hypot(last.x, last.y) || 1;
+    const zLimbus = -g.anteriorRadius * Math.cos(latLimbus);
+    points[points.length - 1] = new THREE.Vector3(
+      halfWtw * last.x / rLen,
+      halfWtw * last.y / rLen,
+      zLimbus
+    );
   }
 
   const geometry = new THREE.BufferGeometry().setFromPoints(points);
