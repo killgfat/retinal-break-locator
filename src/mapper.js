@@ -348,6 +348,35 @@ export function meridianArcLength(theta, semiAxes, meridianDeg = 0) {
 }
 
 /**
+ * 球心角 → 椭球面点 (可视化与几何共用)
+ *
+ * 在子午线平面内, 椭圆参数式 (a·sin t, c·cos t) 与球心角 θ 的关系为
+ * tan θ = (c/a)·tan t, 故 t = atan2(a·sinθ, c·cosθ)。
+ * 返回该平面内的径向分量与沿前后轴的分量。
+ *
+ * ⚠️ 近似: 把黄斑方位 φ 直接当作椭球子午线方向 λ。黄斑偏离光轴 angle alpha
+ * (≈5°) 时, 真实子午线方向略有不同, 对形状的影响 <0.5%。
+ *
+ * @param {number} theta - 球心角 (弧度), 自黄斑量起
+ * @param {number} phiRad - 黄斑切平面方位角 (弧度), φ=0 为图像右, +90° 为图像上
+ * @param {Object} semiAxes - retinalSemiAxes()
+ * @returns {Object} { radial, axial, paramAngle, semiAxis }
+ *   radial: 垂直于前后轴的分量 (mm); axial: 沿前后轴的分量 (mm, 黄斑方向为正)
+ */
+export function surfacePoint(theta, phiRad, semiAxes) {
+  const a = meridianSemiAxis(semiAxes, phiRad * RAD);
+  const c = semiAxes.axial;
+  const t = Math.atan2(a * Math.sin(theta), c * Math.cos(theta));
+
+  return {
+    radial: a * Math.sin(t),
+    axial: c * Math.cos(t),
+    paramAngle: t,
+    semiAxis: a
+  };
+}
+
+/**
  * meridianArcLength 的反函数: 弧长 → 球心角
  * 牛顿迭代, 初值用后极曲率半径 a²/c (小角度下精确)。
  *

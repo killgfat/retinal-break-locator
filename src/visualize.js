@@ -9,7 +9,13 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { ANATOMY, calculateEyeGeometry, createProjectionModel } from './mapper.js';
+import {
+  ANATOMY,
+  calculateEyeGeometry,
+  createProjectionModel,
+  meridianSemiAxis,
+  surfacePoint
+} from './mapper.js';
 
 const DEG = Math.PI / 180;
 
@@ -86,9 +92,7 @@ function createReferenceSphere(eyeGeometry) {
     referenceSphere.material.dispose();
   }
   
-  const { retinalRadius, corneaRadius, corneaDiameter } = eyeGeometry;
-  
-  const geometry = createEyeballGeometry(retinalRadius, corneaRadius, corneaDiameter);
+  const geometry = createEyeballGeometry(eyeGeometry);
   
   const material = new THREE.MeshBasicMaterial({
     color: 0x333366,
@@ -100,48 +104,83 @@ function createReferenceSphere(eyeGeometry) {
   scene.add(referenceSphere);
 }
 
-function createEyeballGeometry(retinalRadius, corneaRadius, corneaDiameter) {
+/**
+ * 眼球轮廓几何 —— 三段式
+ *
+ *   lat = 0                 后极
+ *   lat ≤ 90°               后段: 扁椭球 (赤道半轴 a(λ), 前后半轴 c)
+ *   lat = 90°               赤道 (接缝)
+ *   90° < lat < latLimbus   前段: 球, 半径 anteriorRadius
+ *   最前一圈                角膜球冠
+ *
+ * 以黄斑为 lat = 0 的极点生成 (与渲染约定一致: 黄斑朝 -z)。
+ * 方位方向用该子午线的椭球赤道半轴, 因此横向 ≠ 纵向 (三轴) 能表达。
+ *
+ * ⚠️ 前段的 lat 跨度由解剖弧长 limbusToEquatorArc / anteriorRadius 决定,
+ * 与 mapper 的内表面分段一致 (不用等效球反推的 limbusPolarAngle)。
+ */
+export function createEyeballGeometry(eyeGeometry) {
   const geometry = new THREE.BufferGeometry();
   const vertices = [];
   const indices = [];
-  
-  const segmentsLat = 64;
-  const segmentsLon = 64;
-  const halfCorneaDiameter = corneaDiameter / 2;
-  
-  const zAtLimbus = Math.sqrt(retinalRadius * retinalRadius - halfCorneaDiameter * halfCorneaDiameter);
-  const corneaSag = corneaRadius - Math.sqrt(corneaRadius * corneaRadius - halfCorneaDiameter * halfCorneaDiameter);
-  const corneaApexZ = zAtLimbus + corneaSag;
-  
+
+  const segmentsLat = 72;
+  const segmentsLon = 96;
+
+  const {
+    semiAxes,
+    anteriorRadius,
+    limbusToEquatorArc,
+    corneaRadius,
+    corneaDiameter
+  } = eyeGeometry;
+
+  const halfCornea = corneaDiameter / 2;
+  const latEquator = Math.PI / 2;
+
+  // 前段可视化用等效球极角 (与角膜直径自洽: sin(lat) = WTW/2 / R_ant)
+  const latLimbus = eyeGeometry.limbusPolarAngle;
+  const limbusRingRadius = anteriorRadius * Math.sin(latLimbus);
+  // 角膜缘处的轴向坐标 (黄斑方向为正, 前方为负)
+  const axialLimbus = anteriorRadius * Math.cos(latLimbus);
+  const corneaSag = corneaRadius - Math.sqrt(Math.max(0,
+    corneaRadius * corneaRadius - Math.min(corneaRadius, limbusRingRadius) ** 2));
+  // 角膜顶点比角膜缘更靠前 ⇒ 更负
+  const corneaApex = axialLimbus - corneaSag;
+
   for (let lat = 0; lat <= segmentsLat; lat++) {
+    const latAngle = (lat / segmentsLat) * latLimbus;
+
     for (let lon = 0; lon <= segmentsLon; lon++) {
-      const latAngle = (lat / segmentsLat) * Math.PI;
       const lonAngle = (lon / segmentsLon) * 2 * Math.PI;
-      
-      let x, y, z;
-      
-      const sinLat = Math.sin(latAngle);
-      const cosLat = Math.cos(latAngle);
-      const sinLon = Math.sin(lonAngle);
       const cosLon = Math.cos(lonAngle);
-      
-      const radialDistance = sinLat * retinalRadius;
-      
-      const isInCorneaRegion = latAngle < Math.PI / 2 && radialDistance <= halfCorneaDiameter;
-      
-      if (isInCorneaRegion) {
-        const localR = radialDistance;
-        const sqrtVal = Math.sqrt(Math.max(0, corneaRadius * corneaRadius - localR * localR));
-        z = corneaApexZ - corneaRadius + sqrtVal;
-        x = localR * cosLon;
-        y = localR * sinLon;
+      const sinLon = Math.sin(lonAngle);
+
+      const a = meridianSemiAxis(semiAxes, lonAngle * 180 / Math.PI);
+      const c = semiAxes.axial;
+
+      let radial, axial;
+
+      if (latAngle <= latEquator) {
+        // 椭圆参数式: tan θ = (c/a)·tan t
+        const t = Math.atan2(a * Math.sin(latAngle), c * Math.cos(latAngle));
+        radial = a * Math.sin(t);
+        axial = c * Math.cos(t);
       } else {
-        x = sinLat * cosLon * retinalRadius;
-        y = sinLat * sinLon * retinalRadius;
-        z = cosLat * retinalRadius;
+        // 前段用该子午线的赤道半轴, 保证在 lat=90° 处与椭球连续
+        // (横向 aH ≠ 纵向 aV, 若统一用 aH 会在纵向产生 0.08mm 跳变)
+        radial = a * Math.sin(latAngle);
+        axial = a * Math.cos(latAngle);
       }
-      
-      vertices.push(x, y, z);
+
+      // 角膜球冠 (最前一圈): 极径 ≤ 角膜半径的前段顶点改成球冠
+      if (latAngle > latEquator && radial <= halfCornea) {
+        const localR = radial;
+        axial = corneaApex + corneaRadius -
+          Math.sqrt(Math.max(0, corneaRadius * corneaRadius - localR * localR));
+      }
+
+      vertices.push(radial * cosLon, radial * sinLon, -axial);
     }
   }
   
@@ -178,12 +217,16 @@ function createCornea(eyeGeometry) {
     limbusRing = null;
   }
   
-  const { retinalRadius, corneaDiameter } = eyeGeometry;
+  const { anteriorRadius, corneaDiameter } = eyeGeometry;
   const halfCorneaDiameter = corneaDiameter / 2;
-  
-  const zAtLimbus = Math.sqrt(retinalRadius * retinalRadius - halfCorneaDiameter * halfCorneaDiameter);
-  
-  const ringGeometry = new THREE.TorusGeometry(halfCorneaDiameter, 0.08, 16, 64);
+
+  // 角膜缘圈: 前段球上极角 limbusPolarAngle 处的纬圈 (与角膜直径自洽)
+  const latLimbus = eyeGeometry.limbusPolarAngle;
+  const limbusRingRadius = Math.min(halfCorneaDiameter,
+    anteriorRadius * Math.sin(latLimbus));
+  const zAtLimbus = -anteriorRadius * Math.cos(latLimbus);
+
+  const ringGeometry = new THREE.TorusGeometry(limbusRingRadius, 0.08, 16, 64);
   const ringMaterial = new THREE.MeshBasicMaterial({
     color: 0x333366,
     transparent: true,
@@ -221,7 +264,7 @@ function animate() {
  * @param {number} segments - 球体分段数
  * @returns {THREE.BufferGeometry} 自定义几何体
  */
-function createRetinalSphereGeometry(model, segments = 128) {
+export function createRetinalSphereGeometry(model, segments = 128) {
   const geometry = new THREE.BufferGeometry();
 
   const vertices = [];
@@ -239,19 +282,27 @@ function createRetinalSphereGeometry(model, segments = 128) {
       const u = i / segments;
       const v = j / segments;
 
-      // 绕图像中心解投影 → 黄斑基准笛卡尔 (黄斑 z = +R)
+      // 绕图像中心解投影 → 黄斑基准 (球心角, 方位)
       const p = model.unproject(u, v);
       const m = model.toMaculaFrame(p.u);
 
-      // 本模块渲染约定黄斑位于 z = -R (z 翻转)
-      const x = m.x;
-      const y = m.y;
-      const z = -m.z;
+      // 球心角 + 方位 → 椭球面点 (黄斑 = 极点)
+      const sp = surfacePoint(m.theta, m.phi, model.semiAxes);
+
+      // 渲染约定: 黄斑朝 -z
+      const x = sp.radial * Math.cos(m.phi);
+      const y = sp.radial * Math.sin(m.phi);
+      const z = -sp.axial;
 
       vertices.push(x, y, z);
 
-      // 内表面法线 (指向球心)
-      normals.push(-x / radius, -y / radius, -z / radius);
+      // 内表面法线 = −∇F, F = (x²+y²)/a² + z²/c²。
+      // 扁椭球赤道附近 "指向球心" 的近似会偏约 7°, 用梯度才与几何一致。
+      const gx = x / (sp.semiAxis * sp.semiAxis);
+      const gy = y / (sp.semiAxis * sp.semiAxis);
+      const gz = z / (model.semiAxes.axial * model.semiAxes.axial);
+      const gLen = Math.hypot(gx, gy, gz) || 1;
+      normals.push(-gx / gLen, -gy / gLen, -gz / gLen);
 
       uvs.push(u, 1 - v);
     }
@@ -423,7 +474,7 @@ export function setMarkers(markers, options = {}) {
 function updateMarkerMeshes() {
   if (!currentTexture || !currentEyeGeometry || !currentModel) return;
 
-  const R = currentModel.R;
+  const { semiAxes } = currentModel;
 
   Object.keys(markerMeshes).forEach(type => {
     if (markerMeshes[type]) {
@@ -444,9 +495,9 @@ function updateMarkerMeshes() {
   }
   
   if (currentMarkers.macula) {
-    // 黄斑基准系的正极 ⇒ 定向后恒在 (0, 0, -R)
+    // 黄斑基准系的正极 ⇒ 定向后恒在 (0, 0, -c)
     markerMeshes.macula = createMarkerSphere(
-      0, 0, -R,
+      0, 0, -semiAxes.axial,
       0xff6b6b,
       '黄斑'
     );
@@ -482,10 +533,13 @@ function imageToSpherePosition(x, y, model) {
   const p = model.unproject(x, y);
   const m = model.toMaculaFrame(p.u);
 
+  // 落在椭球面上, 而不是球面
+  const sp = surfacePoint(m.theta, m.phi, model.semiAxes);
+
   return {
-    x: m.x,
-    y: m.y,
-    z: -m.z
+    x: sp.radial * Math.cos(m.phi),
+    y: sp.radial * Math.sin(m.phi),
+    z: -sp.axial
   };
 }
 
@@ -538,8 +592,8 @@ function createLimbusArcLine(model, eyeSide) {
 
   const cosStart = uH.x * uAxis.x + uH.y * uAxis.y + uH.z * uAxis.z;
   const startTheta = Math.acos(Math.max(-1, Math.min(1, cosStart)));
-  // 角膜缘所在等纬圆的球心角,由 mapper 的眼球几何单一来源提供
-  const endTheta = currentEyeGeometry.limbusPolarAngle;
+  // 角膜缘: 与 mapper 内表面同几何 (赤道 + 前段弧长/半径), 不用等效球反推
+  const endTheta = currentEyeGeometry.limbusAngleAnterior;
 
   if (!(endTheta > startTheta)) return null;
 
@@ -553,21 +607,32 @@ function createLimbusArcLine(model, eyeSide) {
   if (e1Len < 1e-9) return null; // 裂孔恰在光轴极点上, 方向不定
   e1 = { x: e1.x / e1Len, y: e1.y / e1Len, z: e1.z / e1Len };
 
-  const retinalRadius = model.R;
   const points = [];
-  const segments = 50;
+  const segments = 64;
 
+  // 黄斑基准系内的方位: 由切平面基底的 x/y 分量给出
+  // (uAxis 与 e1 张成该路径所在的大圆平面, 与 mapper 的分段弧长同一子午线)
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
     const theta = startTheta + t * (endTheta - startTheta);
     const s = Math.sin(theta);
     const c = Math.cos(theta);
 
-    // 黄斑基准系 → 本模块 z 翻转
+    // 该点相对黄斑的方位 (用于查椭球子午线半轴)
+    const radialDir = {
+      x: s * e1.x + c * uAxis.x,
+      y: s * e1.y + c * uAxis.y,
+      z: s * e1.z + c * uAxis.z
+    };
+    const phi = Math.atan2(radialDir.y, radialDir.x);
+
+    // 椭球面上的点 (theta 已含 alpha 修正)
+    const sp = surfacePoint(theta, phi, model.semiAxes);
+
     points.push(new THREE.Vector3(
-      retinalRadius * (s * e1.x + c * uAxis.x),
-      retinalRadius * (s * e1.y + c * uAxis.y),
-      -retinalRadius * (s * e1.z + c * uAxis.z)
+      sp.radial * Math.cos(phi),
+      sp.radial * Math.sin(phi),
+      -sp.axial
     ));
   }
 
