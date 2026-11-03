@@ -157,6 +157,42 @@ describe('createEyeballGeometry (三段式轮廓)', () => {
     }
   });
 
+  it('the anterior transition matches the corneal tangent at the limbus', () => {
+    // 回归: 只用 cos/sin 插值时终点切线是水平的 (dz/du=0), 与角膜球冠
+    // 在边缘的斜切向 (dz/dr ≈ -1.13) 撞出折角 —— 视觉上像凹进去一块。
+    // 现在用 Hermite, 两端导数分别锚定椭球赤道切向与角膜边缘切向。
+    for (const al of [24, 30]) {
+      const g = calculateEyeGeometry(al);
+      const geo = createEyeballGeometry(g);
+      const p = geo.attributes.position.array;
+
+      const segLat = 72;
+      const segLon = 96;
+      const last = segLat;
+      const prev = segLat - 1;
+
+      // lon = 0 子午线, 最后两点
+      const i1 = (last * (segLon + 1)) * 3;
+      const i0 = (prev * (segLon + 1)) * 3;
+
+      const r1 = Math.hypot(p[i1], p[i1 + 1]);
+      const r0 = Math.hypot(p[i0], p[i0 + 1]);
+      const z1 = p[i1 + 2];
+      const z0 = p[i0 + 2];
+      const slope = (z1 - z0) / (r1 - r0);
+
+      // 角膜球冠在边缘的解析切线: dz/dr = -halfWtw / sqrt(Rc² - halfWtw²)
+      const half = g.corneaDiameter / 2;
+      const target = -half / Math.sqrt(g.corneaRadius ** 2 - half ** 2);
+
+      // 离散误差 (< 1°), 但必须同号且接近
+      expect(slope).toBeLessThan(-0.8);
+      expect(Math.abs(slope - target)).toBeLessThan(0.1);
+
+      geo.dispose();
+    }
+  });
+
   it('the corneal cap meets the limbus without a gap', () => {
     // 球冠是独立网格, 边缘必须与主体最后一圈重合 (位置相同)
     for (const al of [20, 24, 30]) {

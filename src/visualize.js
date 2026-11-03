@@ -191,12 +191,46 @@ export function createEyeballGeometry(eyeGeometry) {
         // 球面走到角膜缘时 radial = a·sin(latLimbus) = 6.19, 而角膜固定
         // WTW/2 = 5.85 —— 纵向径向差 0.34mm、轴向往里差 0.62mm, 就是视图上那圈台阶。
         //
-        // 改为两端锚定的插值:
-        //   u=0 (赤道):   radial = a(λ),    axial = 0        ← 与椭球连续
-        //   u=1 (角膜缘): radial = WTW/2,   axial = -zLimbus ← 与角膜球冠对齐
+        // 改为三次 Hermite: 位置 + **切线** 两端锚定。
+        //
+        // 只锚位置不够 —— 用 cos/sin 插值时终点切线是水平的 (dz/du=0),
+        // 而角膜球冠在边缘是斜着向后弯的 (dz/dr ≈ -1.13), 两者形成一个折角,
+        // 视觉上就是"凹进去一块"。
+        //
+        //   u=0 (赤道):   P=(a(λ), 0),       切线 = (0, +1)      ← 椭球在赤道处切向沿 z
+        //   u=1 (角膜缘): P=(WTW/2, zLimbus), 切线 = (-cosL, sinL) ← 与角膜球冠同切向
         const u = (latAngle - latEquator) / Math.max(1e-9, latLimbus - latEquator);
-        radial = halfCornea + (a - halfCornea) * Math.cos(u * Math.PI / 2);
-        axial = -zLimbus * Math.sin(u * Math.PI / 2);
+        const u2 = u * u;
+        const u3 = u2 * u;
+        const h00 = 2 * u3 - 3 * u2 + 1;
+        const h10 = u3 - 2 * u2 + u;
+        const h01 = -2 * u3 + 3 * u2;
+        const h11 = u3 - u2;
+
+        // 角膜球冠在边缘处的单位切向 (指向顶点: r 减小, z 增大)
+        const cosEdge = Math.sqrt(Math.max(0,
+          corneaRadius * corneaRadius - halfCornea * halfCornea)) / corneaRadius;
+        const sinEdge = halfCornea / corneaRadius;
+
+        const r0 = a;
+        const z0 = 0;
+        const r1 = halfCornea;
+        const z1 = zLimbus;
+        // 控制柄长度: 取两端距离的一半, 保证曲线不过冲
+        const handle = 0.5 * Math.hypot(r1 - r0, z1 - z0);
+
+        // Hermite 的 h10/h11 后面跟的是**导数向量** (dr/du, dz/du),
+        // 必须整个向量乘同一个长度。分别乘不同标量会让 m1 方向偏离,
+        // 末端切向反而更离谱 (曾算到 -1.82 vs 角膜 -1.13)。
+        const L = 0.35 * Math.hypot(r1 - r0, z1 - z0);
+        const m0r = 0;
+        const m0z = L;              // 赤道: 切向沿 +z
+        const m1r = -cosEdge * L;   // 角膜缘: 指向顶点 (r 减小)
+        const m1z = sinEdge * L;    //           (z 增大)
+
+        radial = h00 * r0 + h10 * m0r + h01 * r1 + h11 * m1r;
+        const zCurve = h00 * z0 + h10 * m0z + h01 * z1 + h11 * m1z;
+        axial = -zCurve;
       }
 
       vertices.push(radial * cosLon, radial * sinLon, -axial);
