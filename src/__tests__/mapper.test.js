@@ -722,6 +722,38 @@ describe('calculateLimbusDistance', () => {
     expect(result.limbusToBreakMm).toBeCloseTo(eyeGeometry.limbusToEquatorArc, 9);
   });
 
+  it('scales the anterior segment by the same radius ratio on both surfaces', () => {
+    // θ=90° 时只剩前段 (角膜缘→赤道)。外表面必须由内表面按同一半径比例放大,
+    // 不能另用 (R+t)·(limbusPolarAngle−90°): 后者与解剖常数不是同一个几何,
+    // 会凭空多出约 1mm (曾导致 θ=0 处内外差 1.96mm)。
+    const g = calculateEyeGeometry(24);
+    const atEquator = calculateLimbusDistance(90);
+    const expectedRatio = (g.anteriorRadius + g.scleraThickness) / g.anteriorRadius;
+
+    expect(atEquator.limbusToBreakMm).toBeCloseTo(g.limbusToEquatorArc, 9);
+    expect(atEquator.limbusToBreakExternalMm / atEquator.limbusToBreakMm)
+      .toBeCloseTo(expectedRatio, 9);
+    // 差值应约为 厚度×弧长/半径 ≈ 0.6mm, 而不是 1.6mm
+    expect(atEquator.limbusToBreakExternalMm - atEquator.limbusToBreakMm)
+      .toBeLessThan(0.8);
+  });
+
+  it('keeps the internal/external ratio near t/R across the whole posterior retina', () => {
+    const g = calculateEyeGeometry(24);
+    const ratio = 1 + g.scleraThickness / g.anteriorRadius;   // ≈ 1.052
+
+    for (const t of [0, 30, 60, 90, 117]) {
+      const r = calculateLimbusDistance(t);
+      expect(r.limbusToBreakExternalMm / r.limbusToBreakMm)
+        .toBeCloseTo(ratio, 1);
+    }
+    // 差值随剩余弧长单调下降 (θ 越大, 还剩越短的一段)
+    const far = calculateLimbusDistance(0);
+    const near = calculateLimbusDistance(117);
+    expect(far.limbusToBreakExternalMm - far.limbusToBreakMm)
+      .toBeGreaterThan(near.limbusToBreakExternalMm - near.limbusToBreakMm);
+  });
+
   it('external (scleral) arc always exceeds the internal (retinal) arc', () => {
     for (const t of [0, 30, 60, 90]) {
       const r = calculateLimbusDistance(t);

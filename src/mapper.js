@@ -1293,7 +1293,14 @@ export function calculateLimbusDistance(
   }
 
   // 外表面: 前段球 + 巩膜厚度, 后段椭球各半轴 + 巩膜厚度。
+  //
+  // ⚠️ 前段必须由**内表面前段**按同一半径比例放大, 不能另用
+  // (R + t)·(limbusPolarAngle − 90°): limbusPolarAngle 来自等效球拟合,
+  // 与解剖常数 limbusToEquatorArc 不是同一个几何, 两者会凭空差 1mm。
   const t = eyeGeometry.scleraThickness;
+  const anteriorOuterArc = eyeGeometry.limbusToEquatorArc *
+    ((eyeGeometry.anteriorRadius + t) / eyeGeometry.anteriorRadius);
+
   const semiAxesOuter = {
     horizontal: semiAxes.horizontal + t,
     vertical: semiAxes.vertical + t,
@@ -1301,9 +1308,8 @@ export function calculateLimbusDistance(
   };
   let limbusToBreakExternalMm;
   if (thetaFromOpticalAxis <= serrata) {
-    const limbusToEquatorOuter = (R + t) * (eyeGeometry.limbusPolarAngle - equator);
     const equatorArcOuter = meridianArcLength(equator, semiAxesOuter, meridian);
-    limbusToBreakExternalMm = limbusToEquatorOuter + equatorArcOuter -
+    limbusToBreakExternalMm = anteriorOuterArc + equatorArcOuter -
       meridianArcLength(thetaFromOpticalAxis, semiAxesOuter, meridian);
   } else {
     limbusToBreakExternalMm = Math.max(0, (R + t) * (eyeGeometry.limbusPolarAngle - thetaFromOpticalAxis));
